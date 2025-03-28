@@ -62,7 +62,7 @@ export function relocateFsPlugin(options: RelocateFsOptions = {}): Plugin {
   let assetDirAbs: string;
 
   return {
-    name: 'vite-plugin-relocate-fs-concise',
+    name: 'standaloner:relocate',
 
     configResolved(config) {
       viteConfig = config;

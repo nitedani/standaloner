@@ -45,7 +45,7 @@ const standaloner = (options: StandalonerPluginOptions = {}) => {
         const entry = Object.entries(output)
           .filter(e => 'isEntry' in e[1] && e[1].isEntry)
           .map(e => e[1].fileName)
-          .find(e => e === 'index.js');
+          .find(e => /index\.m?js/.test(e));
         assertUsage(entry, 'no input found in config.input');
         input = path.join(outDir, entry);
       },
