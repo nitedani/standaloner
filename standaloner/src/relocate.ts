@@ -1,4 +1,4 @@
-import type { Plugin, ResolvedConfig } from 'vite';
+import type { Plugin } from 'vite';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url'; 
@@ -38,7 +38,6 @@ const getUniqueAssetName = (
  * Assumes __dirname is shimmed/available at runtime. Supports various path patterns.
  */
 export function relocatePlugin(options: RelocateOptions): Plugin {
-  let viteConfig: ResolvedConfig;
   const emittedAssetMap = new Map<string, string>();
   const emittedAssetNames = new Set<string>();
   const functionsToScan = new Set([
@@ -46,7 +45,6 @@ export function relocatePlugin(options: RelocateOptions): Plugin {
     'statSync', 'stat', 'lstatSync', 'lstat', 'accessSync', 'access',
     'readdirSync', 'readdir', 'copyFileSync', 'copyFile',
   ]);
-  let projectRoot: string;
 
   return {
     name: 'standaloner:relocate',
