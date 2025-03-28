@@ -20,6 +20,8 @@ const standaloner = async (options: StandalonerOptions) => {
   const bundleOptions = typeof options.bundle === 'object' ? options.bundle : {};
   const { outDir, root, inputPaths, baseDir } = resolvePaths(options);
 
+
+  // TODO: this is not good, we should trace first then bundle
   const bundleOutput =
     options.bundle !== false
       ? await bundle({
