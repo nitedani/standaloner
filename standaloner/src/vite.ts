@@ -3,7 +3,7 @@ import type { Plugin } from 'vite';
 import { standaloner as standaloner_, type StandalonerOptions } from './index.js';
 import { assertUsage, toPosixPath } from './utils/utils.js';
 import type { OptionalField } from './utils/types.js';
-import { relocateFsPlugin } from './relocate.js';
+import { relocatePlugin } from './relocate.js';
 
 export { standaloner };
 export { standaloner as default };
@@ -17,11 +17,17 @@ const standaloner = (options: StandalonerPluginOptions = {}) => {
   const external = bundleOptions.external ?? [];
   const externalStr = Array.isArray(external) ? external.filter(e => typeof e === 'string') : [];
   let outDir: typeof options.outDir;
+  let root: string;
 
   return [
-    relocateFsPlugin(),
+    relocatePlugin({
+      root: () => root,
+    }),
     {
       name: 'standaloner',
+      configResolved(config) {
+        root = config.root;
+      },
       configEnvironment(config, env) {
         return {
           resolve: {
@@ -32,6 +38,7 @@ const standaloner = (options: StandalonerPluginOptions = {}) => {
           },
         };
       },
+      apply: 'build',
       applyToEnvironment(environment) {
         return environment.name === 'ssr';
       },
@@ -57,6 +64,7 @@ const standaloner = (options: StandalonerPluginOptions = {}) => {
             outDir,
             ...options,
             input,
+            __isViteCall: true,
           });
         },
       },

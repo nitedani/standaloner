@@ -1,29 +1,24 @@
 import { bundle, type BundleOptions } from './bundle.js';
-import path from 'path';
 import { trace } from './trace.js';
-import { searchForPackageRoot, searchForWorkspaceRoot } from './utils/searchRoot.js';
-import { assertUsage, findCommonAncestor, resolveInputs } from './utils/utils.js';
+import { resolvePaths } from './utils/resolveOptions.js';
+import { assertUsage } from './utils/utils.js';
 
-export { standaloner };
-export { standaloner as default };
+export { standaloner as default, standaloner };
 export type { StandalonerOptions };
 
 type StandalonerOptions = {
   input: BundleOptions['input'];
   outDir?: string;
-  bundle?: boolean | Omit<BundleOptions, 'input'>;
+  bundle?: boolean | Omit<BundleOptions, 'input' | 'root'>;
   trace?: boolean;
   cleanup?: boolean;
+  __isViteCall?: boolean;
 };
 
 const standaloner = async (options: StandalonerOptions) => {
   assertUsage(options.input, 'No input specified');
-  const inputPaths = resolveInputs(options.input);
-  const inputCommonDir = findCommonAncestor(inputPaths);
-  const outDir = options.outDir ? path.join(process.cwd(), options.outDir) : inputCommonDir;
-  const baseDir = searchForWorkspaceRoot(inputCommonDir);
-  const root = searchForPackageRoot(inputCommonDir);
   const bundleOptions = typeof options.bundle === 'object' ? options.bundle : {};
+  const { outDir, root, inputPaths, baseDir } = resolvePaths(options);
 
   const bundleOutput =
     options.bundle !== false
@@ -35,6 +30,8 @@ const standaloner = async (options: StandalonerOptions) => {
             dir: bundleOptions.output?.dir ?? outDir,
           },
           cleanup: options.cleanup,
+          root,
+          __isViteCall: options.__isViteCall,
         })
       : null;
 

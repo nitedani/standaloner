@@ -1,13 +1,19 @@
-import express from "express";
-import { apply } from "vike-server/express";
-import { serve } from "vike-server/express/serve";
-import { init } from "../database/todoItems.js";
-import path from "path"
+import express from 'express';
+import { apply } from 'vike-server/express';
+import { serve } from 'vike-server/express/serve';
+import { init } from '../database/todoItems.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
-const file = path.join(__dirname, './file.txt');
-console.log(file);
+// const file = fs.statSync(path.join(__dirname,'./file.txt'));
+// console.log(file);
 const file2 = path.join(__dirname, './nested/file.txt');
 console.log(file2);
+
+const file = fs.statSync(fileURLToPath(new URL('./file.txt', import.meta.url)));
+console.log(file);
+
 async function startServer() {
   await init();
   const app = express();
@@ -18,4 +24,4 @@ async function startServer() {
 
 startServer();
 
-console.log(__dirname);
+console.log('__dirname is:', __dirname);

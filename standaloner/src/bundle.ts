@@ -1,19 +1,28 @@
 import fs from 'fs';
 import path from 'path';
-import { build, type BuildOptions } from 'rolldown';
+import { build, type BuildOptions, type Plugin } from 'rolldown';
+import { relocatePlugin } from './relocate.js';
 import { assert } from './utils/utils.js';
 
-export type BundleOptions = BuildOptions & { cleanup?: boolean };
+export type BundleOptions = BuildOptions & {
+  cleanup?: boolean;
+  root: string;
+  __isViteCall?: boolean;
+};
 
 export const bundle = async (options: BundleOptions) => {
   assert(options.input, 'No input specified');
   assert(options.output?.dir, 'No output directory specified');
-  const { cleanup, ...rest } = options;
-
+  const { cleanup, root, __isViteCall, ...rest } = options;
+  const plugins = [rest.plugins].flat();
+  if (!__isViteCall) {
+    plugins.push(relocatePlugin({ root }) as Plugin);
+  }
   const out = await build({
     platform: 'node',
     write: true,
     ...rest,
+    plugins,
     output: {
       target: 'es2022',
       banner: generateBanner(),
