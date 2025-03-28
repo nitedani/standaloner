@@ -6,6 +6,8 @@ import path from "path"
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const file = path.join(__dirname, './file.txt');
 console.log(file);
+const file2 = path.join(__dirname, './nested/file.txt');
+console.log(file2);
 async function startServer() {
   await init();
   const app = express();
