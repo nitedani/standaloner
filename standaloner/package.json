@@ -1,0 +1,29 @@
+{
+    "name": "standaloner",
+    "version": "1.0.0",
+    "description": "",
+    "type": "module",
+    "main": "dist/index.js",
+    "exports": {
+        ".": "./dist/index.js",
+        "./vite": "./dist/vite.js"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "MIT",
+    "scripts": {
+        "build": "rm -rf dist && tsc"
+    },
+    "dependencies": {
+        "@vercel/nft": "^0.29.2",
+        "rolldown": "1.0.0-beta.7"
+    },
+    "devDependencies": {
+        "async-sema": "^3.1.1",
+        "typescript": "^5.8.2",
+        "vite": "^6.2.3"
+    },
+    "files": [
+        "dist/"
+    ]
+}
