@@ -1,6 +1,4 @@
 import type { Node } from 'estree'; // Or use acorn's Node type if preferred
-import path from 'node:path';
-// import { fileURLToPath } from 'node:url'; // Only if evaluating URL objects
 
 // Define a type for the context variables passed to the evaluator
 type EvaluationVars = Record<string, any>;
@@ -117,35 +115,3 @@ export function evaluateStaticPath(node: Node | null | undefined, vars: Evaluati
   // If no visitor matches, the node type isn't supported for static path evaluation
   return undefined;
 }
-
-// Example Usage (within your Vite plugin's transform hook):
-/*
-import { evaluateStaticPath } from './path/to/evaluateStaticPath';
-import path from 'node:path';
-
-// ... inside transform(code, id) ...
-const currentFileDir = path.dirname(id);
-const vars = {
-  __dirname: currentFileDir,
-  path: path, // Provide the actual path module
-  // process: process, // Optionally provide process for process.env evaluation
-  // URL: URL // If handling new URL(...)
-};
-
-simpleWalk(ast, {
-  enter: (node, parent) => {
-    // ... detect your fs call patterns ...
-    if (isFsCallPattern(node)) {
-       const pathArgumentNode = node.arguments[0]; // Assuming path is the first arg
-       const evaluatedPath = evaluateStaticPath(pathArgumentNode, vars);
-
-       if (typeof evaluatedPath === 'string') {
-         // Successfully evaluated to a static string path!
-         // ... resolve path, filter, emit, rewrite using evaluatedPath ...
-       } else {
-         // Path argument is dynamic or couldn't be evaluated
-       }
-    }
-  }
-});
-*/
