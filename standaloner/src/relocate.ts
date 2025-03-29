@@ -58,7 +58,7 @@ interface ReferenceContext {
  * A Rollup plugin that handles unbundlable assets by:
  * 1. Finding file references in code using AST parsing
  * 2. Copying those files to the output directory
- * 3. Rewriting references uniformly using import.meta.ROLLUP_FILE_URL_
+ * 3. Rewriting references uniformly using import.meta.STANDALONER_FILE_URL_
  * 4. Using resolveFileUrl to generate appropriate runtime code (URL or path)
  *
  * @param options - Plugin configuration options
@@ -73,6 +73,8 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
   const emittedAssets = new Map<string, string>();
   // Store context for each referenceId
   const referenceContextRegistry = new Map<string, ReferenceContext>();
+  // Map from referenceId to fileName once it's known
+  const referenceIdToFileName = new Map<string, string>();
 
   return {
     name: 'asset-relocator',
@@ -109,7 +111,7 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
         );
         referenceContextRegistry.set(referenceId, { type: 'load', sourceId: id });
         logVerbose(`Loaded asset: ${id} -> referenceId: ${referenceId}`);
-        return `export default import.meta.ROLLUP_FILE_URL_${referenceId};`;
+        return `export default import.meta.STANDALONER_FILE_URL_${referenceId};`;
       } catch (err) {
         this.warn({
           code: 'ASSET_LOAD_ERROR',
@@ -183,7 +185,7 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
             magicString.overwrite(
               transformInfo.start,
               transformInfo.end,
-              `import.meta.ROLLUP_FILE_URL_${referenceId}`
+              `import.meta.STANDALONER_FILE_URL_${referenceId}`
             );
             hasChanges = true;
 
@@ -213,25 +215,74 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
       return null;
     },
 
-    resolveFileUrl({ referenceId, relativePath, chunkId, moduleId, format }) {
-      const context = referenceContextRegistry.get(referenceId);
-      const type = context?.type ?? 'url';
-      logVerbose(
-        `Resolving file URL for referenceId ${referenceId} (type: ${type}) in chunk ${chunkId} (format: ${format}). Relative path: ${relativePath}`
-      );
+    renderStart() {
+      for (const referenceId of referenceContextRegistry.keys()) {
+        const fileName = this.getFileName(referenceId);
+        if (fileName) {
+          referenceIdToFileName.set(referenceId, fileName);
+          logVerbose(`Mapped referenceId ${referenceId} to fileName ${fileName}`);
+        }
+      }
+    },
 
-      if (type === 'url') {
-        return `new URL(${JSON.stringify(relativePath)}, import.meta.url)`;
-      }
-      if (type === 'path' || type === 'fs') {
-        return `new URL(${JSON.stringify(relativePath)}, import.meta.url).pathname`;
-      }
-      if (type === 'require') {
-        return `require(${JSON.stringify(relativePath)})`;
+    renderChunk(code, chunk, outputOptions) {
+      // Regex to find all import.meta.STANDALONER_FILE_URL_referenceId patterns
+      const importMetaUrlPattern = /import\.meta\.STANDALONER_FILE_URL_([a-zA-Z0-9$_]+)/g;
+
+      const magicString = new MagicString(code);
+      let hasChanges = false;
+      let match;
+
+      // Process each match
+      while ((match = importMetaUrlPattern.exec(code))) {
+        const placeholder = match[0];
+        const referenceId = match[1];
+        assert(referenceId, 'Missing referenceId');
+        const context = referenceContextRegistry.get(referenceId);
+        const fileName = referenceIdToFileName.get(referenceId);
+
+        if (!context || !fileName) {
+          this.warn({
+            code: 'MISSING_REFERENCE_INFO',
+            message: `Missing context or fileName for referenceId ${referenceId} in chunk ${chunk.fileName}`,
+          });
+          continue;
+        }
+
+        // Calculate the relative path from the chunk to the asset
+        const relativePath = path.posix.relative(path.posix.dirname(chunk.fileName), fileName);
+        const relativePathWithDot = relativePath.startsWith('./')
+          ? relativePath
+          : `./${relativePath}`;
+
+        // Generate replacement based on reference type
+        let replacement;
+        const { type } = context;
+
+        if (type === 'url') {
+          replacement = `new URL(${JSON.stringify(relativePathWithDot)}, import.meta.url)`;
+        } else if (type === 'path' || type === 'fs') {
+          replacement = `new URL(${JSON.stringify(relativePathWithDot)}, import.meta.url).pathname`;
+        } else if (type === 'require' || type === 'load') {
+          replacement = `require(${JSON.stringify(relativePathWithDot)})`;
+        } else {
+          assert(false, `Unknown reference type: ${type}`);
+        }
+
+        magicString.overwrite(match.index, match.index + placeholder.length, replacement);
+        hasChanges = true;
+
+        logVerbose(
+          `In chunk ${chunk.fileName}, replaced ${placeholder} with ${replacement} (type: ${type})`
+        );
       }
 
-      assert(type === 'load');
-      return null;
+      if (!hasChanges) return null;
+
+      return {
+        code: magicString.toString(),
+        map: magicString.generateMap({ hires: true }) as SourceMapInput,
+      };
     },
   };
 }

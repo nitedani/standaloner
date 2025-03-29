@@ -4,7 +4,6 @@ import { build, type BuildOptions, type Plugin } from 'rolldown';
 import { assetRelocatorPlugin } from './relocate.js';
 import { assert } from './utils/utils.js';
 import { externalPatterns } from './utils/default-externals.js';
-import { nodePolyfills } from './utils/nodePolyfills.js';
 
 export type BundleOptions = Omit<BuildOptions, 'external'> & {
   external?: (string | RegExp)[];
@@ -18,7 +17,7 @@ export const bundle = async (options: BundleOptions) => {
   assert(options.output?.dir, 'No output directory specified');
   const { cleanup, root, __isViteCall, ...rest } = options;
   const plugins = [rest.plugins].flat();
-  plugins.push(assetRelocatorPlugin() as Plugin, nodePolyfills() as Plugin);
+  plugins.push(assetRelocatorPlugin({ outputDir: '.static' }) as Plugin);
   const external = [...(options.external ?? []), ...externalPatterns];
 
   const out = await build({
@@ -30,6 +29,7 @@ export const bundle = async (options: BundleOptions) => {
     output: {
       target: 'es2022',
       inlineDynamicImports: true,
+      banner: generateBanner(),
       ...(rest.output || {}),
     },
     experimental: {
@@ -72,3 +72,13 @@ export const bundle = async (options: BundleOptions) => {
 
   return { ...out, outFilePaths };
 };
+function generateBanner() {
+  return [
+    "import { dirname as dirname987 } from 'path';",
+    "import { fileURLToPath as fileURLToPath987 } from 'url';",
+    "import { createRequire as createRequire987 } from 'module';",
+    'var require = createRequire987(import.meta.url);',
+    'var __filename = fileURLToPath987(import.meta.url);',
+    'var __dirname = dirname987(__filename);',
+  ].join('\n');
+}

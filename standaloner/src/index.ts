@@ -9,7 +9,9 @@ export type { StandalonerOptions };
 type StandalonerOptions = {
   input: BundleOptions['input'];
   outDir?: string;
-  bundle?: boolean | (Omit<BundleOptions, 'input' | 'root' | 'external'> & { external?: string[] });
+  bundle?:
+    | boolean
+    | (Omit<BundleOptions, 'input' | 'root' | 'external'> & { external?: (string | RegExp)[] });
   trace?: boolean;
   cleanup?: boolean;
   verbose?: boolean;
