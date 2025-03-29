@@ -9,7 +9,7 @@ const __dirname = path.dirname(new URL(import.meta.url).pathname);
 // const file = fs.statSync(path.join(__dirname,'./file.txt'));
 // console.log(file);
 const file2 = path.join(__dirname, './nested/file.txt');
-console.log(file2);
+console.log(fs.statSync(file2));
 
 const file = fs.statSync(fileURLToPath(new URL('./file.txt', import.meta.url)));
 console.log(file);

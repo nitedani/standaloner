@@ -3,8 +3,9 @@ import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { platform } from 'node:os';
 import { nodeFileTrace, type NodeFileTraceResult } from '@vercel/nft';
-import { assert, logInfo, toPosixPath } from './utils/utils.js'; 
+import { assert, toPosixPath } from './utils/utils.js';
 import { searchForPackageRoot } from './utils/searchRoot.js';
+import { logInfo, logVerbose, logWarning } from './utils/logging.js';
 
 export { trace };
 
@@ -21,12 +22,12 @@ interface PackageJson {
 }
 
 interface TracedFile {
-  path: string;           // Full real path to the file
-  subpath: string;        // Path relative to package root
-  parents: string[];      // Full real paths of parent files
-  pkgName: string;        // Package name
-  pkgVersion: string;     // Package version
-  pkgPath: string;        // Path to package root (relative to baseDir)
+  path: string; // Full real path to the file
+  subpath: string; // Path relative to package root
+  parents: string[]; // Full real paths of parent files
+  pkgName: string; // Package name
+  pkgVersion: string; // Package version
+  pkgPath: string; // Path to package root (relative to baseDir)
   packageJson: PackageJson; // Package.json contents
 }
 
@@ -50,7 +51,7 @@ async function trace({
   nodeModulesDir?: string;
 }): Promise<void> {
   assert(input.length > 0, 'Input must be non-empty');
-  logInfo('Tracing package dependencies...');
+  logVerbose('Tracing package dependencies...');
 
   // Check for unsupported PnP
   try {
@@ -71,7 +72,7 @@ async function trace({
   const tracedFiles = await traceProjectFiles(input, baseDir, outDir);
 
   if (Object.keys(tracedFiles).length === 0) {
-    logInfo('No traceable package dependencies found.');
+    logVerbose('No traceable package dependencies found.');
     return;
   }
 
@@ -95,13 +96,17 @@ async function traceProjectFiles(
   const filesToProcess = [...traceResults.fileList].filter(file => {
     const reason = traceResults.reasons.get(file);
     // Exclude initial files, system paths, and anything already inside the target output dir
-    return !(reason?.type.includes('initial') || file.startsWith('usr/') || file.startsWith(relOutDir));
+    return !(
+      reason?.type.includes('initial') ||
+      file.startsWith('usr/') ||
+      file.startsWith(relOutDir)
+    );
   });
 
   const tracedFilesMap: Record<string, TracedFile> = {};
   const batchSize = 100; // Process in batches for performance
 
-  logInfo(`Analyzing ${filesToProcess.length} potential dependency files...`);
+  logVerbose(`Analyzing ${filesToProcess.length} potential dependency files...`);
 
   for (let i = 0; i < filesToProcess.length; i += batchSize) {
     const batch = filesToProcess.slice(i, i + batchSize);
@@ -142,8 +147,9 @@ async function processSingleFile(
     // Resolve symlinks for accurate path identification and parent tracking
     const realPath = await fs.realpath(fullPath).catch(() => fullPath);
     // Get parent files (dependents) that led to this file being included
-    const parentPaths = [...(traceResults.reasons.get(fileRelativePath)?.parents || [])]
-        .map(p => path.join(baseDir, p)); // Store full paths of parents
+    const parentPaths = [...(traceResults.reasons.get(fileRelativePath)?.parents || [])].map(p =>
+      path.join(baseDir, p)
+    ); // Store full paths of parents
 
     const baseInfo: Pick<TracedFile, 'path' | 'parents'> = { path: realPath, parents: parentPaths };
 
@@ -157,11 +163,10 @@ async function processSingleFile(
 
     // Only return a TracedFile object if package info was successfully resolved
     return pkgInfo ? { ...baseInfo, ...pkgInfo } : null;
-
   } catch (error: any) {
-     // Log errors encountered during processing of a single file but continue tracing others
-     logInfo(`Skipping file ${posixPath} due to error: ${error.message}`);
-     return null;
+    // Log errors encountered during processing of a single file but continue tracing others
+    logWarning(`Skipping file ${posixPath} due to error: ${error.message}`);
+    return null;
   }
 }
 
@@ -169,8 +174,8 @@ async function processSingleFile(
  * Resolves package info for a file assumed to be within a workspace package by searching upwards for package.json.
  */
 async function resolveWorkspacePackage(
-    absoluteFilePath: string, // Use absolute path for reliable searching
-    baseDir: string
+  absoluteFilePath: string, // Use absolute path for reliable searching
+  baseDir: string
 ): Promise<Omit<TracedFile, 'path' | 'parents'> | null> {
   try {
     // Find the nearest package.json directory above the file
@@ -183,8 +188,8 @@ async function resolveWorkspacePackage(
 
     // A package must have a name to be considered valid in this context
     if (!pkgJson?.name) {
-        logInfo(`Workspace package at ${pkgRoot} skipped: missing name.`);
-        return null;
+      logWarning(`Workspace package at ${pkgRoot} skipped: missing name.`);
+      return null;
     }
 
     return {
@@ -192,11 +197,11 @@ async function resolveWorkspacePackage(
       pkgVersion: pkgJson.version || DEFAULT_VERSION,
       pkgPath: path.relative(baseDir, pkgRoot), // Path relative to the tracing base directory
       subpath: path.relative(pkgRoot, absoluteFilePath), // Path relative to its own package root
-      packageJson: pkgJson
+      packageJson: pkgJson,
     };
   } catch (error: any) {
     // Fail gracefully if package.json is missing or unparsable
-    // logInfo(`Could not resolve workspace package for ${absoluteFilePath}: ${error.message}`);
+    logWarning(`Could not resolve workspace package for ${absoluteFilePath}: ${error.message}`);
     return null;
   }
 }
@@ -205,8 +210,8 @@ async function resolveWorkspacePackage(
  * Resolves package info for a file path assumed to be within node_modules using regex.
  */
 async function resolveNodeModulesPackage(
-    relativePath: string, // Path relative to baseDir
-    baseDir: string
+  relativePath: string, // Path relative to baseDir
+  baseDir: string
 ): Promise<Omit<TracedFile, 'path' | 'parents'> | null> {
   const match = NODE_MODULES_RE.exec(relativePath);
   if (!match) {
@@ -214,7 +219,7 @@ async function resolveNodeModulesPackage(
     return null;
   }
   const [, nodeModulesBase, pkgName, rawSubpath = ''] = match;
-  
+
   assert(pkgName, `Failed to parse package name from ${relativePath}`);
   assert(nodeModulesBase, `Failed to parse node_modules base from ${relativePath}`);
 
@@ -239,17 +244,16 @@ async function resolveNodeModulesPackage(
     pkgPath,
     subpath,
     // Use the successfully read package.json, or provide a minimal default stub
-    packageJson: pkgJson || { name: pkgName, version: DEFAULT_VERSION }
+    packageJson: pkgJson || { name: pkgName, version: DEFAULT_VERSION },
   };
 }
-
 
 /**
  * Organizes traced dependency files, copies/links them into the output node_modules structure.
  */
 async function processTracedFiles(
   tracedFiles: Record<string, TracedFile>,
-  { nodeModulesPath, versionsPath }: { nodeModulesPath: string; versionsPath: string; }
+  { nodeModulesPath, versionsPath }: { nodeModulesPath: string; versionsPath: string }
 ): Promise<void> {
   // Group files by package name and version for easier processing
   const packageRegistry: Record<string, Record<string, string[]>> = {}; // { [pkgName]: { [version]: [filePath, ...] } }
@@ -270,7 +274,7 @@ async function processTracedFiles(
 
     if (versionEntries.length === 1) {
       // --- Single version package ---
-      const [/*version*/, files] = versionEntries[0]!;
+      const [, /*version*/ files] = versionEntries[0]!;
       const destDir = path.join(nodeModulesPath, name);
       copyTasks.push(copyPackageVersion(files, destDir, tracedFiles));
       logInfo(`  ${name}: Copying single version`);
@@ -290,20 +294,23 @@ async function processTracedFiles(
       // Prepare to symlink the newest version (first after sort) to the main node_modules output
       const [newestVersionStr] = sortedVersions[0]!;
       topLevelSymlinkTasks.push({
-          source: path.join(versionsPath, `${name}@${newestVersionStr}`), // Source is in .versions
-          target: path.join(nodeModulesPath, name) // Target is in top-level node_modules
+        source: path.join(versionsPath, `${name}@${newestVersionStr}`), // Source is in .versions
+        target: path.join(nodeModulesPath, name), // Target is in top-level node_modules
       });
     }
   }
 
-  logInfo('Copying package files...');
+  logVerbose('Copying package files...');
   await Promise.all(copyTasks); // Execute all file copying concurrently
 
-  logInfo('Creating dependency symlinks...');
+  logVerbose('Creating dependency symlinks...');
   // Create necessary symlinks *between* packages for multi-version resolution
-  await createDependencySymlinks(tracedFiles, multiVersionPackages, { nodeModulesPath, versionsPath });
+  await createDependencySymlinks(tracedFiles, multiVersionPackages, {
+    nodeModulesPath,
+    versionsPath,
+  });
 
-  logInfo('Creating top-level symlinks...');
+  logVerbose('Creating top-level symlinks...');
   // Finally, create the top-level symlinks for the newest versions of multi-version packages
   await Promise.all(topLevelSymlinkTasks.map(task => createSymlink(task.source, task.target)));
 }
@@ -328,34 +335,37 @@ async function copyPackageVersion(
   const copyErrors: string[] = [];
 
   // Copy all files belonging to this package version concurrently
-  await Promise.all(sourceFilePaths.map(async (srcPath) => {
-    const fileMeta = tracedFiles[srcPath];
-    if (!fileMeta) {
+  await Promise.all(
+    sourceFilePaths.map(async srcPath => {
+      const fileMeta = tracedFiles[srcPath];
+      if (!fileMeta) {
         copyErrors.push(`Missing metadata for ${srcPath}`);
         return; // Skip if metadata lookup fails unexpectedly
-    }
+      }
 
-    const destPath = path.join(destPackageDir, fileMeta.subpath); // Destination path including subdirectories
+      const destPath = path.join(destPackageDir, fileMeta.subpath); // Destination path including subdirectories
 
-    if (destPath.length > MAX_PATH_LENGTH) {
+      if (destPath.length > MAX_PATH_LENGTH) {
         copyErrors.push(`Path too long (${destPath.length}): ${destPath}`);
         return;
-    }
+      }
 
-    try {
-      // Ensure subdirectory structure exists before copying
-      await fs.mkdir(path.dirname(destPath), { recursive: true });
-      await fs.copyFile(srcPath, destPath);
-    } catch (e: any) {
-      copyErrors.push(`Copy failed ${srcPath} -> ${destPath}: ${e.message}`);
-    }
-  }));
+      try {
+        // Ensure subdirectory structure exists before copying
+        await fs.mkdir(path.dirname(destPath), { recursive: true });
+        await fs.copyFile(srcPath, destPath);
+      } catch (e: any) {
+        copyErrors.push(`Copy failed ${srcPath} -> ${destPath}: ${e.message}`);
+      }
+    })
+  );
 
   // Log any errors encountered during copying
   if (copyErrors.length > 0) {
-    logInfo(`Encountered ${copyErrors.length} errors copying files for ${path.basename(destPackageDir)}.`);
-    // Consider logging the first few errors for easier debugging:
-    // copyErrors.slice(0, 5).forEach(err => logInfo(`  - ${err}`));
+    logWarning(
+      `Encountered ${copyErrors.length} errors copying files for ${path.basename(destPackageDir)}.`
+    );
+    copyErrors.slice(0, 5).forEach(err => logWarning(`  - ${err}`));
   }
 
   // Write package.json (with production exports applied) to the destination directory
@@ -363,12 +373,12 @@ async function copyPackageVersion(
   applyProductionCondition(finalPkgJson.exports); // Modify exports in-place
   try {
     await fs.writeFile(
-        path.join(destPackageDir, 'package.json'),
-        JSON.stringify(finalPkgJson, null, 2), // Pretty-print JSON
-        'utf8'
+      path.join(destPackageDir, 'package.json'),
+      JSON.stringify(finalPkgJson, null, 2), // Pretty-print JSON
+      'utf8'
     );
   } catch (e: any) {
-      logInfo(`Error writing package.json for ${path.basename(destPackageDir)}: ${e.message}`);
+    logInfo(`Error writing package.json for ${path.basename(destPackageDir)}: ${e.message}`);
   }
 }
 
@@ -380,56 +390,60 @@ async function copyPackageVersion(
 async function createDependencySymlinks(
   tracedFiles: Record<string, TracedFile>,
   multiVersionPackages: Record<string, Record<string, string[]>>, // Pkgs with >1 version traced
-  { nodeModulesPath, versionsPath }: { nodeModulesPath: string; versionsPath: string; }
+  { nodeModulesPath, versionsPath }: { nodeModulesPath: string; versionsPath: string }
 ): Promise<void> {
-    // Use a Map to store symlink tasks (target -> source), automatically handling duplicates
-    const symlinkTasks = new Map<string, string>();
-    const symlinkErrors: string[] = [];
+  // Use a Map to store symlink tasks (target -> source), automatically handling duplicates
+  const symlinkTasks = new Map<string, string>();
+  const symlinkErrors: string[] = [];
 
-    // Iterate through all traced files to find dependencies crossing package boundaries
-    for (const file of Object.values(tracedFiles)) {
-        // Check each parent (dependent) file that required the current 'file'
-        for (const parentPath of file.parents) {
-            const parentFile = tracedFiles[parentPath];
+  // Iterate through all traced files to find dependencies crossing package boundaries
+  for (const file of Object.values(tracedFiles)) {
+    // Check each parent (dependent) file that required the current 'file'
+    for (const parentPath of file.parents) {
+      const parentFile = tracedFiles[parentPath];
 
-            // Only create nested links if the dependency ('file') is multi-versioned
-            // Ensure parent file metadata exists, it belongs to a package,
-            // and it's a *different* package than the current file.
-            if (multiVersionPackages[file.pkgName] && parentFile?.pkgName && parentFile.pkgName !== file.pkgName) {
-                  // Determine the output directory of the *parent* package
-                  const parentPackageOutputDir = multiVersionPackages[parentFile.pkgName]
-                      ? path.join(versionsPath, `${parentFile.pkgName}@${parentFile.pkgVersion}`) // Parent is also multi-version
-                      : path.join(nodeModulesPath, parentFile.pkgName); // Parent is single-version
+      // Only create nested links if the dependency ('file') is multi-versioned
+      // Ensure parent file metadata exists, it belongs to a package,
+      // and it's a *different* package than the current file.
+      if (
+        multiVersionPackages[file.pkgName] &&
+        parentFile?.pkgName &&
+        parentFile.pkgName !== file.pkgName
+      ) {
+        // Determine the output directory of the *parent* package
+        const parentPackageOutputDir = multiVersionPackages[parentFile.pkgName]
+          ? path.join(versionsPath, `${parentFile.pkgName}@${parentFile.pkgVersion}`) // Parent is also multi-version
+          : path.join(nodeModulesPath, parentFile.pkgName); // Parent is single-version
 
-                  // The symlink target is inside the parent's node_modules directory
-                  // e.g., .../parent@1.0.0/node_modules/dependency
-                  const target = path.join(parentPackageOutputDir, 'node_modules', file.pkgName);
+        // The symlink target is inside the parent's node_modules directory
+        // e.g., .../parent@1.0.0/node_modules/dependency
+        const target = path.join(parentPackageOutputDir, 'node_modules', file.pkgName);
 
-                  // The symlink source points to the specific version of the dependency required
-                  // e.g., ../../.versions/dependency@2.0.0 (relative path is calculated later)
-                  const source = path.join(versionsPath, `${file.pkgName}@${file.pkgVersion}`);
+        // The symlink source points to the specific version of the dependency required
+        // e.g., ../../.versions/dependency@2.0.0 (relative path is calculated later)
+        const source = path.join(versionsPath, `${file.pkgName}@${file.pkgVersion}`);
 
-                  // Add task to map (overwrites if target already exists, ensuring one link per target)
-                  symlinkTasks.set(target, source);
-            }
-        }
+        // Add task to map (overwrites if target already exists, ensuring one link per target)
+        symlinkTasks.set(target, source);
+      }
     }
+  }
 
-    // Execute all unique symlink tasks concurrently
-    await Promise.all(
-        [...symlinkTasks.entries()].map(async ([target, source]) => {
-            try {
-                await createSymlink(source, target);
-            } catch (e: any) {
-                symlinkErrors.push(`Symlink failed ${source} -> ${target}: ${e.message}`);
-            }
-        })
-    );
+  // Execute all unique symlink tasks concurrently
+  await Promise.all(
+    [...symlinkTasks.entries()].map(async ([target, source]) => {
+      try {
+        await createSymlink(source, target);
+      } catch (e: any) {
+        symlinkErrors.push(`Symlink failed ${source} -> ${target}: ${e.message}`);
+      }
+    })
+  );
 
-    if (symlinkErrors.length > 0) {
-        logInfo(`Encountered ${symlinkErrors.length} errors creating dependency symlinks.`);
-        // symlinkErrors.slice(0, 5).forEach(err => logInfo(`  - ${err}`));
-    }
+  if (symlinkErrors.length > 0) {
+    logWarning(`Encountered ${symlinkErrors.length} errors creating dependency symlinks.`);
+    symlinkErrors.slice(0, 5).forEach(err => logWarning(`  - ${err}`));
+  }
 }
 
 /**
@@ -440,7 +454,9 @@ async function createDependencySymlinks(
 async function createSymlink(source: string, target: string): Promise<void> {
   if (target.length > MAX_PATH_LENGTH) {
     // Throw an error for path length issues as it's often unrecoverable
-    throw new Error(`Cannot create symlink, target path exceeds ${MAX_PATH_LENGTH} chars: ${target}`);
+    throw new Error(
+      `Cannot create symlink, target path exceeds ${MAX_PATH_LENGTH} chars: ${target}`
+    );
   }
 
   // Ensure the parent directory of the target symlink exists
@@ -449,19 +465,21 @@ async function createSymlink(source: string, target: string): Promise<void> {
   // Only create the link if the target path doesn't already exist (as file or link)
   // This prevents errors and avoids unnecessary filesystem operations.
   if (!existsSync(target)) {
-      // Calculate the relative path from the link's location to the source directory
-      const relativeSource = path.relative(path.dirname(target), source);
+    // Calculate the relative path from the link's location to the source directory
+    const relativeSource = path.relative(path.dirname(target), source);
 
-      // Use 'junction' on Windows for directory-like links (works better across drives),
-      // 'dir' on other platforms. fs.symlink handles files correctly with these types too.
-      const linkType = platform() === 'win32' ? 'junction' : 'dir';
+    // Use 'junction' on Windows for directory-like links (works better across drives),
+    // 'dir' on other platforms. fs.symlink handles files correctly with these types too.
+    const linkType = platform() === 'win32' ? 'junction' : 'dir';
 
-      try {
-          await fs.symlink(relativeSource, target, linkType);
-      } catch (error: any) {
-          // Add context to symlink creation errors
-          throw new Error(`Failed to create symlink from ${relativeSource} to ${target}: ${error.message}`);
-      }
+    try {
+      await fs.symlink(relativeSource, target, linkType);
+    } catch (error: any) {
+      // Add context to symlink creation errors
+      throw new Error(
+        `Failed to create symlink from ${relativeSource} to ${target}: ${error.message}`
+      );
+    }
   }
   // If target exists, assume it's correct (or was handled in a previous run) and do nothing.
 }
@@ -471,37 +489,38 @@ async function createSymlink(source: string, target: string): Promise<void> {
  * to apply the "production" condition where present, simplifying the exports structure.
  */
 function applyProductionCondition(exports: any): void {
-    if (!exports || typeof exports !== 'object') {
-        return; // Base case: not a traversable object
-    }
+  if (!exports || typeof exports !== 'object') {
+    return; // Base case: not a traversable object
+  }
 
-    // Check if a "production" condition exists directly at this level
-    if ('production' in exports && exports.production != null) { // Check for non-null/undefined value
-        const prodExportsValue = exports.production;
-        // Crucially, remove the 'production' key *before* merging
-        delete exports.production;
+  // Check if a "production" condition exists directly at this level
+  if ('production' in exports && exports.production != null) {
+    // Check for non-null/undefined value
+    const prodExportsValue = exports.production;
+    // Crucially, remove the 'production' key *before* merging
+    delete exports.production;
 
-        // Merge the production exports into the current level.
-        // If prodExportsValue is a string, it defines the main export ("."), replacing others at this level.
-        // If it's an object, its properties are merged into the current exports level.
-        if (typeof prodExportsValue === 'string') {
-             // Clear existing keys at this level and set the main export
-             Object.keys(exports).forEach(key => delete exports[key]);
-             exports["."] = prodExportsValue;
-        } else if (typeof prodExportsValue === 'object') {
-            Object.assign(exports, prodExportsValue);
-        }
-        // Note: After applying production, we might have introduced new nested objects that need processing,
-        // so we continue the loop below.
+    // Merge the production exports into the current level.
+    // If prodExportsValue is a string, it defines the main export ("."), replacing others at this level.
+    // If it's an object, its properties are merged into the current exports level.
+    if (typeof prodExportsValue === 'string') {
+      // Clear existing keys at this level and set the main export
+      Object.keys(exports).forEach(key => delete exports[key]);
+      exports['.'] = prodExportsValue;
+    } else if (typeof prodExportsValue === 'object') {
+      Object.assign(exports, prodExportsValue);
     }
+    // Note: After applying production, we might have introduced new nested objects that need processing,
+    // so we continue the loop below.
+  }
 
-    // Recurse into any remaining nested objects (other conditions or subpath exports like "./subpath")
-    for (const key in exports) {
-        // Avoid infinite loops for circular references (though unlikely in valid package.json)
-        if (typeof exports[key] === 'object' && exports[key] !== null) {
-            applyProductionCondition(exports[key]);
-        }
+  // Recurse into any remaining nested objects (other conditions or subpath exports like "./subpath")
+  for (const key in exports) {
+    // Avoid infinite loops for circular references (though unlikely in valid package.json)
+    if (typeof exports[key] === 'object' && exports[key] !== null) {
+      applyProductionCondition(exports[key]);
     }
+  }
 }
 
 /**

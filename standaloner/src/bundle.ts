@@ -1,10 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import { build, type BuildOptions, type Plugin } from 'rolldown';
-import { relocatePlugin } from './relocate.js';
+import { assetRelocatorPlugin } from './relocate.js';
 import { assert } from './utils/utils.js';
+import { externalPatterns } from './utils/default-externals.js';
 
-export type BundleOptions = BuildOptions & {
+export type BundleOptions = Omit<BuildOptions, 'external'> & {
+  external?: (string | RegExp)[];
   cleanup?: boolean;
   root: string;
   __isViteCall?: boolean;
@@ -15,14 +17,15 @@ export const bundle = async (options: BundleOptions) => {
   assert(options.output?.dir, 'No output directory specified');
   const { cleanup, root, __isViteCall, ...rest } = options;
   const plugins = [rest.plugins].flat();
-  if (!__isViteCall) {
-    plugins.push(relocatePlugin({ root }) as Plugin);
-  }
+  plugins.push(assetRelocatorPlugin() as Plugin);
+  const external = [...(options.external ?? []), ...externalPatterns];
+
   const out = await build({
     platform: 'node',
     write: true,
     ...rest,
     plugins,
+    external,
     output: {
       target: 'es2022',
       banner: generateBanner(),

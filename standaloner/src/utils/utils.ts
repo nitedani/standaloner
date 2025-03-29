@@ -7,7 +7,6 @@ export { assertUsage };
 export { findCommonAncestor };
 export { isFileReadable };
 export { toPosixPath };
-export { logInfo };
 
 /**
  * Converts a path to use POSIX separators (forward slashes)
@@ -107,6 +106,3 @@ function assertUsage(condition: unknown, message: string): asserts condition {
   }
 }
 
-function logInfo(message: string): void {
-  console.log(message);
-}

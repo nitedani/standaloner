@@ -1,5 +1,6 @@
 import { bundle, type BundleOptions } from './bundle.js';
 import { trace } from './trace.js';
+import { defaultExternalsPlugin } from './utils/default-externals.js';
 import { resolvePaths } from './utils/resolveOptions.js';
 import { assertUsage } from './utils/utils.js';
 
@@ -9,9 +10,10 @@ export type { StandalonerOptions };
 type StandalonerOptions = {
   input: BundleOptions['input'];
   outDir?: string;
-  bundle?: boolean | Omit<BundleOptions, 'input' | 'root'>;
+  bundle?: boolean | (Omit<BundleOptions, 'input' | 'root' | 'external'> & { external?: string[] });
   trace?: boolean;
   cleanup?: boolean;
+  verbose?: boolean;
   __isViteCall?: boolean;
 };
 
@@ -19,14 +21,15 @@ const standaloner = async (options: StandalonerOptions) => {
   assertUsage(options.input, 'No input specified');
   const bundleOptions = typeof options.bundle === 'object' ? options.bundle : {};
   const { outDir, root, inputPaths, baseDir } = resolvePaths(options);
+  const plugins = [bundleOptions.plugins].flat();
+  const shouldTrace = options.trace ?? true;
 
-
-  // TODO: this is not good, we should trace first then bundle
   const bundleOutput =
     options.bundle !== false
       ? await bundle({
           ...bundleOptions,
           input: options.input,
+          plugins,
           output: {
             ...bundleOptions.output,
             dir: bundleOptions.output?.dir ?? outDir,
@@ -37,7 +40,7 @@ const standaloner = async (options: StandalonerOptions) => {
         })
       : null;
 
-  if (options.trace ?? true) {
+  if (shouldTrace) {
     await trace({
       input: bundleOutput?.outFilePaths ?? inputPaths,
       baseDir,

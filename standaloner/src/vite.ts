@@ -1,48 +1,49 @@
+import { builtinModules } from 'module';
 import path from 'path';
 import type { Plugin } from 'vite';
 import { standaloner as standaloner_, type StandalonerOptions } from './index.js';
-import { assertUsage, toPosixPath } from './utils/utils.js';
+import { assetRelocatorPlugin } from './relocate.js';
+import { defaultExternalsPlugin } from './utils/default-externals.js';
+import { searchForWorkspaceRoot } from './utils/searchRoot.js';
 import type { OptionalField } from './utils/types.js';
-import { relocatePlugin } from './relocate.js';
+import { assertUsage, toPosixPath } from './utils/utils.js';
 
-export { standaloner };
-export { standaloner as default };
+export { standaloner as default, standaloner };
 export type { StandalonerPluginOptions };
 
 type StandalonerPluginOptions = OptionalField<StandalonerOptions, 'input'>;
 
 const standaloner = (options: StandalonerPluginOptions = {}) => {
   let input: typeof options.input;
-  const bundleOptions = typeof options.bundle === 'object' ? options.bundle : {};
-  const external = bundleOptions.external ?? [];
-  const externalStr = Array.isArray(external) ? external.filter(e => typeof e === 'string') : [];
+  const bundle = typeof options.bundle === 'object' ? options.bundle : {};
+  const externalStr = (bundle.external ?? []).filter(e => typeof e === 'string');
   let outDir: typeof options.outDir;
   let root: string;
 
   return [
-    relocatePlugin({
-      root: () => root,
+    defaultExternalsPlugin,
+    assetRelocatorPlugin({
+      verbose: true,
+      outputDir: '.static',
     }),
     {
       name: 'standaloner',
       configResolved(config) {
-        root = config.root;
-      },
-      configEnvironment(config, env) {
-        return {
-          resolve: {
-            external: externalStr,
-          },
-          optimizeDeps: {
-            exclude: externalStr,
-          },
-        };
+        root = searchForWorkspaceRoot(config.root);
       },
       apply: 'build',
       applyToEnvironment(environment) {
         return environment.name === 'ssr';
       },
-      writeBundle(_, output) {
+      configEnvironment() {
+        return {
+          resolve: {
+            external: [...builtinModules, ...builtinModules.map(m => `node:${m}`), ...externalStr],
+            noExternal: true,
+          },
+        };
+      },
+      async writeBundle(_, output) {
         if (options.input) {
           input = options.input;
           return;
@@ -55,18 +56,12 @@ const standaloner = (options: StandalonerPluginOptions = {}) => {
           .find(e => /index\.m?js/.test(e));
         assertUsage(entry, 'no input found in config.input');
         input = path.join(outDir, entry);
-      },
-      closeBundle: {
-        sequential: true,
-        order: 'post',
-        async handler() {
-          await standaloner_({
-            outDir,
-            ...options,
-            input,
-            __isViteCall: true,
-          });
-        },
+        await standaloner_({
+          input,
+          outDir,
+          bundle: false,
+          __isViteCall: true,
+        });
       },
     } satisfies Plugin,
   ];
