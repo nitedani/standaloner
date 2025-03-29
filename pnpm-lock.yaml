@@ -25,33 +25,12 @@ importers:
       acorn:
         specifier: ^8.14.1
         version: 8.14.1
-      acorn-class-fields:
-        specifier: ^1.0.0
-        version: 1.0.0(acorn@8.14.1)
-      acorn-private-class-elements:
-        specifier: ^1.0.0
-        version: 1.0.0(acorn@8.14.1)
-      acorn-static-class-features:
-        specifier: ^1.0.0
-        version: 1.0.0(acorn@8.14.1)
-      bindings:
-        specifier: ^1.5.0
-        version: 1.5.0
       estree-walker:
         specifier: ^3.0.3
         version: 3.0.3
-      glob:
-        specifier: ^11.0.1
-        version: 11.0.1
-      graceful-fs:
-        specifier: ^4.2.11
-        version: 4.2.11
       magic-string:
         specifier: ^0.30.17
         version: 0.30.17
-      node-gyp-build:
-        specifier: ^4.8.4
-        version: 4.8.4
       rolldown:
         specifier: 1.0.0-beta.7
         version: 1.0.0-beta.7(typescript@5.8.2)
@@ -59,12 +38,6 @@ importers:
         specifier: ^2.8.2
         version: 2.8.2
     devDependencies:
-      '@types/graceful-fs':
-        specifier: ^4.1.9
-        version: 4.1.9
-      async-sema:
-        specifier: ^3.1.1
-        version: 3.1.1
       typescript:
         specifier: ^5.8.2
         version: 5.8.2
@@ -926,9 +899,6 @@ packages:
   '@types/express@4.17.21':
     resolution: {integrity: sha512-ejlPM315qwLpaQlQDTjPdsUFSc6ZsP4AN6AlWnogPjQ7CVi7PYF3YVz+CY3jE2pwYf7E/7HlDAN0rV2GxTG0HQ==}
 
-  '@types/graceful-fs@4.1.9':
-    resolution: {integrity: sha512-olP3sd1qOEe5dXTSaFvQG+02VdRXcdytWLAZsAq1PecU8uqQAhkrnbli7DagjtXKW/Bl7YJbUsa8MPcuc8LHEQ==}
-
   '@types/http-errors@2.0.4':
     resolution: {integrity: sha512-D0CFMMtydbJAegzOyHjtiKPLlvnm3iTZyZRSZoLq2mRhDdmLfIWOCYPfQJ4cu2erKghU++QvjcUjp/5h7hESpA==}
 
@@ -1018,28 +988,10 @@ packages:
     resolution: {integrity: sha512-PYAthTa2m2VKxuvSD3DPC/Gy+U+sOA1LAuT8mkmRuvw+NACSaeXEQ+NHcVF7rONl6qcaxV3Uuemwawk+7+SJLw==}
     engines: {node: '>= 0.6'}
 
-  acorn-class-fields@1.0.0:
-    resolution: {integrity: sha512-l+1FokF34AeCXGBHkrXFmml9nOIRI+2yBnBpO5MaVAaTIJ96irWLtcCxX+7hAp6USHFCe+iyyBB4ZhxV807wmA==}
-    engines: {node: '>=4.8.2'}
-    peerDependencies:
-      acorn: ^6 || ^7 || ^8
-
   acorn-import-attributes@1.9.5:
     resolution: {integrity: sha512-n02Vykv5uA3eHGM/Z2dQrcD56kL8TyDb2p1+0P83PClMnC/nc+anbQRhIOWnSq4Ke/KvDPrY3C9hDtC/A3eHnQ==}
     peerDependencies:
       acorn: ^8
-
-  acorn-private-class-elements@1.0.0:
-    resolution: {integrity: sha512-zYNcZtxKgVCg1brS39BEou86mIao1EV7eeREG+6WMwKbuYTeivRRs6S2XdWnboRde6G9wKh2w+WBydEyJsJ6mg==}
-    engines: {node: '>=4.8.2'}
-    peerDependencies:
-      acorn: ^6.1.0 || ^7 || ^8
-
-  acorn-static-class-features@1.0.0:
-    resolution: {integrity: sha512-XZJECjbmMOKvMHiNzbiPXuXpLAJfN3dAKtfIYbk1eHiWdsutlek+gS7ND4B8yJ3oqvHo1NxfafnezVmq7NXK0A==}
-    engines: {node: '>=4.8.2'}
-    peerDependencies:
-      acorn: ^6.1.0 || ^7 || ^8
 
   acorn@8.14.1:
     resolution: {integrity: sha512-OvQ/2pUDKmgfCg++xsTX1wGxfTaszcHVcTctW4UJB4hibJx2HXxxO5UmVgyjMa+ZDsiaf5wWLXYpRWMmBI0QHg==}
@@ -2488,10 +2440,6 @@ snapshots:
       '@types/qs': 6.9.18
       '@types/serve-static': 1.15.7
 
-  '@types/graceful-fs@4.1.9':
-    dependencies:
-      '@types/node': 20.17.27
-
   '@types/http-errors@2.0.4': {}
 
   '@types/mime@1.3.5': {}
@@ -2631,23 +2579,9 @@ snapshots:
       mime-types: 2.1.35
       negotiator: 0.6.3
 
-  acorn-class-fields@1.0.0(acorn@8.14.1):
-    dependencies:
-      acorn: 8.14.1
-      acorn-private-class-elements: 1.0.0(acorn@8.14.1)
-
   acorn-import-attributes@1.9.5(acorn@8.14.1):
     dependencies:
       acorn: 8.14.1
-
-  acorn-private-class-elements@1.0.0(acorn@8.14.1):
-    dependencies:
-      acorn: 8.14.1
-
-  acorn-static-class-features@1.0.0(acorn@8.14.1):
-    dependencies:
-      acorn: 8.14.1
-      acorn-private-class-elements: 1.0.0(acorn@8.14.1)
 
   acorn@8.14.1: {}
 

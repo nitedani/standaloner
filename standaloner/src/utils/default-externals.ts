@@ -135,7 +135,7 @@ const isExternal = (packageId: string) => {
 };
 
 const defaultExternalsPlugin = {
-  name: 'default-externals',
+  name: 'standaloner:default-externals',
   enforce: 'pre',
   resolveId(id: string) {
     if (isExternal(id)) {

@@ -5,7 +5,8 @@ import { init } from '../database/todoItems.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-const __dirname = path.dirname(new URL(import.meta.url).pathname);
+// const __dirname = path.dirname(new URL(import.meta.url).pathname);
+
 // const file = fs.statSync(path.join(__dirname,'./file.txt'));
 // console.log(file);
 const file2 = path.join(__dirname, './nested/file.txt');

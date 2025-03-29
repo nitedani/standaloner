@@ -13,8 +13,6 @@ import { logVerbose } from './utils/logging.js';
 interface AssetRelocatorOptions {
   /** Directory within output to place assets */
   outputDir?: string;
-  /** Enable detailed logging */
-  verbose?: boolean;
 }
 
 const require = createRequire(import.meta.url);

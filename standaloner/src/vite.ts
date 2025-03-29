@@ -7,6 +7,7 @@ import { defaultExternalsPlugin } from './utils/default-externals.js';
 import { searchForWorkspaceRoot } from './utils/searchRoot.js';
 import type { OptionalField } from './utils/types.js';
 import { assertUsage, toPosixPath } from './utils/utils.js';
+import { nodePolyfills } from './utils/nodePolyfills.js';
 
 export { standaloner as default, standaloner };
 export type { StandalonerPluginOptions };
@@ -21,9 +22,9 @@ const standaloner = (options: StandalonerPluginOptions = {}) => {
   let root: string;
 
   return [
+    nodePolyfills(),
     defaultExternalsPlugin,
     assetRelocatorPlugin({
-      verbose: true,
       outputDir: '.static',
     }),
     {
