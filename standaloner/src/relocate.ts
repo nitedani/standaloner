@@ -89,7 +89,7 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
       if (id.startsWith('\0')) return null;
       const ext = path.extname(id).toLowerCase();
       // Let Rollup handle JS/TS/JSON files normally
-      if (['.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.json'].includes(ext)) {
+      if (!['.node'].includes(ext)) {
         return null;
       }
 
