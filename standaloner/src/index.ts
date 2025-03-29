@@ -1,6 +1,5 @@
 import { bundle, type BundleOptions } from './bundle.js';
 import { trace } from './trace.js';
-import { defaultExternalsPlugin } from './utils/default-externals.js';
 import { resolvePaths } from './utils/resolveOptions.js';
 import { assertUsage } from './utils/utils.js';
 
