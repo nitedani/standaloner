@@ -5,18 +5,50 @@ import { assetRelocatorPlugin } from './relocate.js';
 import { assert } from './utils/utils.js';
 import { externalPatterns } from './utils/default-externals.js';
 
+/**
+ * Options for the bundle function
+ */
 export type BundleOptions = Omit<BuildOptions, 'external'> & {
+  /**
+   * Patterns to exclude from bundling
+   */
   external?: (string | RegExp)[];
+
+  /**
+   * Whether to delete the input files after bundling:
+   * - `true`: Delete input files after bundling
+   * - `false` (default): Keep input files
+   *
+   * This is useful when you want to clean up temporary files
+   * that were generated during the build process.
+   */
   cleanup?: boolean;
+
+  /**
+   * Project root directory
+   */
   root: string;
 };
 
+/**
+ * Bundles JavaScript/TypeScript files using Rolldown
+ *
+ * @param options Configuration options for the bundler
+ * @returns Promise that resolves with information about the bundled files
+ */
 export const bundle = async (options: BundleOptions) => {
+  // Validate required options
   assert(options.input, 'No input specified');
   assert(options.output?.dir, 'No output directory specified');
+
+  // Extract options
   const { cleanup, root, ...rest } = options;
+
+  // Set up plugins
   const plugins = [rest.plugins].flat();
   plugins.push(assetRelocatorPlugin({ outputDir: '.static' }) as Plugin);
+
+  // Combine user-provided externals with default patterns
   const external = [...(options.external ?? []), ...externalPatterns];
 
   const out = await build({

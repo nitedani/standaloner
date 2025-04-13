@@ -19,7 +19,7 @@ const standaloner = () => {
       name: 'standaloner',
       apply: 'build',
       applyToEnvironment(environment) {
-        return environment.name === 'ssr';
+        return environment.name !== 'client';
       },
       configEnvironment(_name, _config, _env) {
         return {

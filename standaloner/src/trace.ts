@@ -14,27 +14,53 @@ const DEFAULT_VERSION = '0.0.0';
 const MAX_PATH_LENGTH = 260; // Standard Windows MAX_PATH
 const NODE_MODULES_RE = /((?:.+\/)?node_modules\/)([^/@]+|@[^/]+\/[^/]+)(\/?.*)?$/;
 
-// Core types
+/**
+ * Core types for the trace module
+ */
+
+/**
+ * Simplified package.json structure
+ */
 interface PackageJson {
+  /** Package name */
   name?: string;
+  /** Package version */
   version?: string;
+  /** Package exports configuration */
   exports?: any;
+  /** Any other fields in package.json */
   [key: string]: any;
 }
 
+/**
+ * Represents a traced file with its metadata
+ */
 interface TracedFile {
-  path: string; // Full real path to the file
-  subpath: string; // Path relative to package root
-  parents: string[]; // Full real paths of parent files
-  pkgName: string; // Package name
-  pkgVersion: string; // Package version
-  pkgPath: string; // Path to package root (relative to baseDir)
-  packageJson: PackageJson; // Package.json contents
+  /** Full real path to the file */
+  path: string;
+  /** Path relative to package root */
+  subpath: string;
+  /** Full real paths of parent files that import this file */
+  parents: string[];
+  /** Package name */
+  pkgName: string;
+  /** Package version */
+  pkgVersion: string;
+  /** Path to package root (relative to baseDir) */
+  pkgPath: string;
+  /** Package.json contents */
+  packageJson: PackageJson;
 }
 
 /**
  * Traces dependencies for input files and organizes them into an output directory,
  * handling multi-version packages using a .versions structure.
+ *
+ * This function:
+ * 1. Analyzes the input files to find all required dependencies
+ * 2. Resolves package information for each dependency
+ * 3. Copies all dependencies to the output directory
+ * 4. Handles multiple versions of the same package
  */
 async function trace({
   input,
