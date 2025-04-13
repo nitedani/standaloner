@@ -9,13 +9,12 @@ export type BundleOptions = Omit<BuildOptions, 'external'> & {
   external?: (string | RegExp)[];
   cleanup?: boolean;
   root: string;
-  __isViteCall?: boolean;
 };
 
 export const bundle = async (options: BundleOptions) => {
   assert(options.input, 'No input specified');
   assert(options.output?.dir, 'No output directory specified');
-  const { cleanup, root, __isViteCall, ...rest } = options;
+  const { cleanup, root, ...rest } = options;
   const plugins = [rest.plugins].flat();
   plugins.push(assetRelocatorPlugin({ outputDir: '.static' }) as Plugin);
   const external = [...(options.external ?? []), ...externalPatterns];

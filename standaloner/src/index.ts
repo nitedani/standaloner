@@ -16,7 +16,6 @@ type StandalonerOptions = {
   trace?: boolean;
   cleanup?: boolean;
   verbose?: boolean;
-  __isViteCall?: boolean;
 };
 
 const standaloner = async (options: StandalonerOptions) => {
@@ -44,7 +43,6 @@ const standaloner = async (options: StandalonerOptions) => {
           },
           cleanup: options.cleanup,
           root,
-          __isViteCall: options.__isViteCall,
         })
       : null;
 
