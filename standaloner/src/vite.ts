@@ -1,11 +1,13 @@
 import path from 'path';
 import type { Plugin } from 'vite';
-import { standaloner as standaloner_, type StandalonerOptions } from './index.js';
+import { type StandalonerOptions } from './index.js';
 import { assetRelocatorPlugin } from './relocate.js';
+import { trace } from './trace.js';
+import buildSummary from './utils/buildSummary.js';
 import { defaultExternalsPlugin } from './utils/default-externals.js';
+import { searchForPackageRoot } from './utils/searchRoot.js';
 import type { OptionalField } from './utils/types.js';
 import { assertUsage, toPosixPath } from './utils/utils.js';
-import buildSummary from './utils/buildSummary.js';
 
 export { standaloner as default, standaloner };
 export type { StandalonerPluginOptions };
@@ -40,12 +42,11 @@ const standaloner = () => {
           .find(e => /index\.m?js/.test(e));
         assertUsage(entry, 'no input found in config.input');
         const input = path.join(outDir, entry);
-        await standaloner_({
-          input,
+        await trace({
+          input: [input],
           outDir,
-          bundle: false,
-          cleanup: true,
-          __isViteCall: true,
+          root: config.root,
+          baseDir: searchForPackageRoot(config.root),
         });
 
         buildSummary.printSummary();
