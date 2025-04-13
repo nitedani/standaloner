@@ -6,6 +6,7 @@ import buildSummary from './utils/buildSummary.js';
 import { defaultExternalsPlugin } from './utils/default-externals.js';
 import { searchForWorkspaceRoot } from './utils/searchRoot.js';
 import { assertUsage, toPosixPath } from './utils/utils.js';
+import { builtinModules } from 'module';
 
 export { standaloner as default, standaloner };
 
@@ -21,10 +22,17 @@ const standaloner = () => {
       applyToEnvironment(environment) {
         return environment.name !== 'client';
       },
-      configEnvironment(_name, _config, _env) {
+      configEnvironment(name) {
+        if (name === 'client') {
+          return;
+        }
         return {
           resolve: {
             noExternal: true,
+            external: [...builtinModules, ...builtinModules.map(m => `node:${m}`)],
+          },
+          build: {
+            target: 'es2022',
           },
         };
       },
