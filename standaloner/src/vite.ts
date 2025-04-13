@@ -1,18 +1,13 @@
 import path from 'path';
 import type { Plugin } from 'vite';
-import { type StandalonerOptions } from './index.js';
 import { assetRelocatorPlugin } from './relocate.js';
 import { trace } from './trace.js';
 import buildSummary from './utils/buildSummary.js';
 import { defaultExternalsPlugin } from './utils/default-externals.js';
-import { searchForPackageRoot } from './utils/searchRoot.js';
-import type { OptionalField } from './utils/types.js';
+import { searchForWorkspaceRoot } from './utils/searchRoot.js';
 import { assertUsage, toPosixPath } from './utils/utils.js';
 
 export { standaloner as default, standaloner };
-export type { StandalonerPluginOptions };
-
-type StandalonerPluginOptions = OptionalField<StandalonerOptions, 'input'>;
 
 const standaloner = () => {
   return [
@@ -26,7 +21,7 @@ const standaloner = () => {
       applyToEnvironment(environment) {
         return environment.name === 'ssr';
       },
-      configEnvironment(name, config, env) {
+      configEnvironment(_name, _config, _env) {
         return {
           resolve: {
             noExternal: true,
@@ -36,17 +31,21 @@ const standaloner = () => {
       async writeBundle(_, output) {
         const config = this.environment.config;
         const outDir = toPosixPath(config.build.outDir);
-        const entry = Object.entries(output)
+        // Get all entry files from the output
+        const entries = Object.entries(output)
           .filter(e => 'isEntry' in e[1] && e[1].isEntry)
-          .map(e => e[1].fileName)
-          .find(e => /index\.m?js/.test(e));
-        assertUsage(entry, 'no input found in config.input');
-        const input = path.join(outDir, entry);
+          .map(e => e[1].fileName);
+
+        assertUsage(entries.length > 0, 'No entry files found in build output');
+
+        // Convert entry filenames to full paths
+        const inputPaths = entries.map(entry => path.join(outDir, entry));
+
         await trace({
-          input: [input],
+          input: inputPaths,
           outDir,
           root: config.root,
-          baseDir: searchForPackageRoot(config.root),
+          baseDir: searchForWorkspaceRoot(config.root),
         });
 
         buildSummary.printSummary();
