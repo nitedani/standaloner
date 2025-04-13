@@ -1,11 +1,11 @@
 # Standaloner
 
-Create self-contained, deployable Node.js applications with automatic handling of native modules and dependencies.
+Create self-contained, deployable Node.js applications by bundling your code and including necessary dependencies.
 
 ## Features
 
 - **Deployment-ready output directory** with all dependencies included
-- **Automatic handling of 80+ native modules** (Sharp, Prisma, Canvas, etc.)
+- **Intelligent bundling** with proper handling of native modules and dependencies
 - **Preserves file references** (URLs, paths) and handles multiple dependency versions
 - **Vite integration** via plugin
 
@@ -57,7 +57,7 @@ export default defineConfig({
 ## Common Use Cases
 
 - **SSR Applications**: Build with Vite and deploy the self-contained output
-- **Native Dependencies**: Use modules like Sharp, Prisma, Canvas without configuration
+- **Native Dependencies**: Use modules that can't be bundled without special configuration
 - **Microservices**: Create standalone deployable units for each service
 
 ## Configuration Options
@@ -78,8 +78,8 @@ await standaloner({
   input: 'src/index.js',
   outDir: 'dist',
   bundle: {
-    // Add custom externals (beyond the 80+ automatic ones)
-    external: ['some-package', /^my-org-packages/],
+    // Specify packages to exclude from bundling
+    external: ['some-native-module', /^my-org-packages/],
 
     // Add Rolldown plugins
     plugins: [myPlugin()],
@@ -90,21 +90,11 @@ await standaloner({
 });
 ```
 
-## Default Externals
-
-Standaloner automatically handles 80+ packages including:
-
-- **Database**: Prisma, SQLite3, PostgreSQL, MySQL, MongoDB
-- **Native Modules**: Sharp, Argon2, BCrypt, Canvas, FFmpeg
-- **System**: Chokidar, fs-extra, USB/Bluetooth/Serial access
-- **Other**: TensorFlow.js, PDF libraries, Puppeteer/Playwright
-
-No need to manually specify these - they're handled automatically!
 
 ## How It Works
 
-1. **Bundle**: Uses [Rolldown](https://github.com/rolldown/rolldown) to bundle code (or Vite's build pipeline when using the Vite plugin)
-2. **Trace**: Uses [Node File Trace](https://github.com/vercel/nft) to find unbundled dependencies
+1. **Bundle & Relocate**: Uses [Rolldown](https://github.com/rolldown/rolldown) to bundle code and relocate referenced files to `.static` (or Vite's build pipeline when using the Vite plugin)
+2. **Trace**: Uses [Vercel's Node File Trace](https://github.com/vercel/nft) to detect dependencies that can't be bundled
 3. **Organize**: Copies dependencies to output with proper `node_modules` structure
 
 ## License

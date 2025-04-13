@@ -10,7 +10,7 @@ import { builtinModules } from 'module';
 
 export { standaloner as default, standaloner };
 
-const standaloner = () => {
+const standaloner = (): Plugin[] => {
   return [
     defaultExternalsPlugin,
     assetRelocatorPlugin({
