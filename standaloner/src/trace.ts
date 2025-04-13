@@ -78,7 +78,7 @@ async function trace({
 
   // Copy/link dependencies based on trace results
   await processTracedFiles(tracedFiles, { nodeModulesPath, versionsPath });
-  logInfo('Package dependencies processed successfully.');
+  logInfo('Dependencies copied successfully.');
 }
 
 /**
@@ -121,7 +121,7 @@ async function traceProjectFiles(
     }
   }
 
-  logInfo(`Traced ${Object.keys(tracedFilesMap).length} package dependency files.`);
+  logInfo(`Found ${Object.keys(tracedFilesMap).length} non-bundleable files.`);
   return tracedFilesMap;
 }
 

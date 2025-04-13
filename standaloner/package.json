@@ -12,7 +12,8 @@
     "author": "",
     "license": "MIT",
     "scripts": {
-        "build": "rm -rf dist && tsc"
+        "build": "rm -rf dist && tsc",
+        "dev" :"tsc -w"
     },
     "dependencies": {
         "@vercel/nft": "^0.29.2",

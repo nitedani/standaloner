@@ -41,6 +41,7 @@ const standaloner = () => {
           bundle: {
             external,
           },
+          cleanup: true,
           __isViteCall: true,
         });
       },

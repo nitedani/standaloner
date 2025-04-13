@@ -54,6 +54,19 @@ interface ReferenceContext {
   sourceId: string; // The module where the reference was found
 }
 
+/** Simple map to store reference contexts */
+class ReferenceContextMap {
+  private map = new Map<string, ReferenceContext>();
+
+  set(referenceId: string, _type: ReferenceType, context: ReferenceContext): void {
+    this.map.set(referenceId, context);
+  }
+
+  getReferenceIds(): string[] {
+    return Array.from(this.map.keys());
+  }
+}
+
 /**
  * A Rollup plugin that handles unbundlable assets by:
  * 1. Finding file references in code using AST parsing
@@ -71,8 +84,8 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
   const emittedNames = new Set<string>();
   // Track emitted assets to avoid duplicates - maps original path to referenceId
   const emittedAssets = new Map<string, string>();
-  // Store context for each referenceId
-  const referenceContextRegistry = new Map<string, ReferenceContext>();
+  // Store context for each referenceId and type combination
+  const referenceContextRegistry = new ReferenceContextMap();
   // Map from referenceId to fileName once it's known
   const referenceIdToFileName = new Map<string, string>();
 
@@ -109,9 +122,9 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
           emittedNames,
           outputDir
         );
-        referenceContextRegistry.set(referenceId, { type: 'load', sourceId: id });
+        referenceContextRegistry.set(referenceId, 'load', { type: 'load', sourceId: id });
         logVerbose(`Loaded asset: ${id} -> referenceId: ${referenceId}`);
-        return `export default import.meta.STANDALONER_FILE_URL_${referenceId};`;
+        return `export default import.meta.STANDALONER_FILE_URL_${referenceId}_load;`;
       } catch (err) {
         this.warn({
           code: 'ASSET_LOAD_ERROR',
@@ -175,8 +188,8 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
           );
 
           if (referenceId && transformInfo && 'start' in transformInfo && 'end' in transformInfo) {
-            // Store the context for this referenceId
-            referenceContextRegistry.set(referenceId, {
+            // Store the context for this referenceId and type combination
+            referenceContextRegistry.set(referenceId, transformInfo.type, {
               type: transformInfo.type,
               sourceId: posixId,
             });
@@ -185,7 +198,7 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
             magicString.overwrite(
               transformInfo.start,
               transformInfo.end,
-              `import.meta.STANDALONER_FILE_URL_${referenceId}`
+              `import.meta.STANDALONER_FILE_URL_${referenceId}_${transformInfo.type}`
             );
             hasChanges = true;
 
@@ -216,7 +229,8 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
     },
 
     renderStart() {
-      for (const referenceId of referenceContextRegistry.keys()) {
+      // Map each referenceId to its fileName
+      for (const referenceId of referenceContextRegistry.getReferenceIds()) {
         const fileName = this.getFileName(referenceId);
         if (fileName) {
           referenceIdToFileName.set(referenceId, fileName);
@@ -225,9 +239,9 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
       }
     },
 
-    renderChunk(code, chunk, outputOptions) {
-      // Regex to find all import.meta.STANDALONER_FILE_URL_referenceId patterns
-      const importMetaUrlPattern = /import\.meta\.STANDALONER_FILE_URL_([a-zA-Z0-9$_]+)/g;
+    renderChunk(code, chunk) {
+      // Regex to find all import.meta.STANDALONER_FILE_URL_referenceId patterns with their original context
+      const importMetaUrlPattern = /import\.meta\.STANDALONER_FILE_URL_([a-zA-Z0-9$_]+)_(url|path|fs|require|load)/g;
 
       const magicString = new MagicString(code);
       let hasChanges = false;
@@ -237,14 +251,14 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
       while ((match = importMetaUrlPattern.exec(code))) {
         const placeholder = match[0];
         const referenceId = match[1];
-        assert(referenceId, 'Missing referenceId');
-        const context = referenceContextRegistry.get(referenceId);
-        const fileName = referenceIdToFileName.get(referenceId);
+        const type = match[2] as ReferenceType;
 
-        if (!context || !fileName) {
+        assert(referenceId, 'Missing referenceId');
+        const fileName = referenceIdToFileName.get(referenceId);
+        if (!fileName) {
           this.warn({
-            code: 'MISSING_REFERENCE_INFO',
-            message: `Missing context or fileName for referenceId ${referenceId} in chunk ${chunk.fileName}`,
+            code: 'MISSING_FILENAME',
+            message: `Missing fileName for referenceId ${referenceId} in chunk ${chunk.fileName}`,
           });
           continue;
         }
@@ -255,9 +269,8 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
           ? relativePath
           : `./${relativePath}`;
 
-        // Generate replacement based on reference type
-        let replacement;
-        const { type } = context;
+        // Generate replacement based on the reference type that was captured in the placeholder
+        let replacement = '';
 
         if (type === 'url') {
           replacement = `new URL(${JSON.stringify(relativePathWithDot)}, import.meta.url)`;
@@ -269,12 +282,12 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
           assert(false, `Unknown reference type: ${type}`);
         }
 
-        magicString.overwrite(match.index, match.index + placeholder.length, replacement);
-        hasChanges = true;
-
         logVerbose(
           `In chunk ${chunk.fileName}, replaced ${placeholder} with ${replacement} (type: ${type})`
         );
+
+        magicString.overwrite(match.index, match.index + placeholder.length, replacement);
+        hasChanges = true;
       }
 
       if (!hasChanges) return null;
