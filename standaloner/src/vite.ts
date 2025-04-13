@@ -5,6 +5,7 @@ import { assetRelocatorPlugin } from './relocate.js';
 import { defaultExternalsPlugin } from './utils/default-externals.js';
 import type { OptionalField } from './utils/types.js';
 import { assertUsage, toPosixPath } from './utils/utils.js';
+import buildSummary from './utils/buildSummary.js';
 
 export { standaloner as default, standaloner };
 export type { StandalonerPluginOptions };
@@ -23,11 +24,15 @@ const standaloner = () => {
       applyToEnvironment(environment) {
         return environment.name === 'ssr';
       },
+      configEnvironment(name, config, env) {
+        return {
+          resolve: {
+            noExternal: true,
+          },
+        };
+      },
       async writeBundle(_, output) {
         const config = this.environment.config;
-        const external = Array.isArray(config.resolve.external)
-          ? config.resolve.external.map(e => new RegExp(`^${e}`))
-          : [];
         const outDir = toPosixPath(config.build.outDir);
         const entry = Object.entries(output)
           .filter(e => 'isEntry' in e[1] && e[1].isEntry)
@@ -38,12 +43,12 @@ const standaloner = () => {
         await standaloner_({
           input,
           outDir,
-          bundle: {
-            external,
-          },
+          bundle: false,
           cleanup: true,
           __isViteCall: true,
         });
+
+        buildSummary.printSummary();
       },
     } satisfies Plugin,
   ];

@@ -2,6 +2,7 @@ import { bundle, type BundleOptions } from './bundle.js';
 import { trace } from './trace.js';
 import { resolvePaths } from './utils/resolveOptions.js';
 import { assertUsage } from './utils/utils.js';
+import { setVerbose } from './utils/logging.js';
 
 export { standaloner as default, standaloner };
 export type { StandalonerOptions };
@@ -20,6 +21,12 @@ type StandalonerOptions = {
 
 const standaloner = async (options: StandalonerOptions) => {
   assertUsage(options.input, 'No input specified');
+
+  // Set verbose mode if specified
+  if (options.verbose !== undefined) {
+    setVerbose(options.verbose);
+  }
+
   const bundleOptions = typeof options.bundle === 'object' ? options.bundle : {};
   const { outDir, root, inputPaths, baseDir } = resolvePaths(options);
   const plugins = [bundleOptions.plugins].flat();

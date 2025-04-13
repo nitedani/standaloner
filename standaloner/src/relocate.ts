@@ -7,8 +7,9 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { type PluginContext, type SourceMapInput } from 'rollup';
 import type { Plugin } from 'vite';
-import { assert, toPosixPath } from './utils/utils.js';
+import buildSummary from './utils/buildSummary.js';
 import { logVerbose } from './utils/logging.js';
+import { assert, toPosixPath } from './utils/utils.js';
 
 interface AssetRelocatorOptions {
   /** Directory within output to place assets */
@@ -194,6 +195,9 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
               sourceId: posixId,
             });
 
+            // Record reference in build summary
+            buildSummary.recordReference(posixId, transformInfo.type);
+
             // Uniformly replace the original code with the Rollup file URL meta property
             magicString.overwrite(
               transformInfo.start,
@@ -341,7 +345,17 @@ function emitAssetHelper(
     });
 
     emittedAssets.set(absolutePosixPath, referenceId);
-    logVerbose(`Emitted asset: ${absolutePosixPath} -> ${fileName}`);
+
+    // Record asset in build summary
+    try {
+      const stats = fs.statSync(absolutePosixPath);
+      buildSummary.recordAsset(absolutePosixPath, stats.size);
+    } catch (e) {
+      // If we can't get the file size, just record it with size 0
+      buildSummary.recordAsset(absolutePosixPath, 0);
+    }
+
+    logVerbose(`Emitted asset: ${path.basename(absolutePosixPath)} -> ${fileName}`);
     return referenceId;
   } catch (err) {
     context.warn({

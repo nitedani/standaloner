@@ -6,6 +6,7 @@ import { nodeFileTrace, type NodeFileTraceResult } from '@vercel/nft';
 import { assert, toPosixPath } from './utils/utils.js';
 import { searchForPackageRoot } from './utils/searchRoot.js';
 import { logInfo, logVerbose, logWarning } from './utils/logging.js';
+import buildSummary from './utils/buildSummary.js';
 
 export { trace };
 
@@ -78,7 +79,28 @@ async function trace({
 
   // Copy/link dependencies based on trace results
   await processTracedFiles(tracedFiles, { nodeModulesPath, versionsPath });
-  logInfo('Dependencies copied successfully.');
+
+  // Record dependency statistics in build summary
+  const packageRegistry: Record<string, Record<string, string[]>> = {};
+
+  // Group files by package name and version
+  for (const file of Object.values(tracedFiles)) {
+    packageRegistry[file.pkgName] ??= {};
+    packageRegistry[file.pkgName]![file.pkgVersion] ??= [];
+    packageRegistry[file.pkgName]![file.pkgVersion]!.push(file.path);
+  }
+
+  const multiVersionCount = Object.values(packageRegistry)
+    .filter(versions => Object.keys(versions).length > 1)
+    .length;
+
+  buildSummary.recordDependencies(
+    Object.keys(packageRegistry).length,
+    multiVersionCount,
+    Object.keys(tracedFiles).length
+  );
+
+  // Don't log here, the build summary will show the results
 }
 
 /**
@@ -121,7 +143,7 @@ async function traceProjectFiles(
     }
   }
 
-  logInfo(`Found ${Object.keys(tracedFilesMap).length} non-bundleable files.`);
+  logVerbose(`Found ${Object.keys(tracedFilesMap).length} non-bundleable files.`);
   return tracedFilesMap;
 }
 
@@ -277,11 +299,13 @@ async function processTracedFiles(
       const [, /*version*/ files] = versionEntries[0]!;
       const destDir = path.join(nodeModulesPath, name);
       copyTasks.push(copyPackageVersion(files, destDir, tracedFiles));
-      logInfo(`  ${name}: Copying single version`);
+      // Add package name to build summary instead of logging
+      buildSummary.addPackageName(name);
     } else {
       // --- Multi-version package ---
       multiVersionPackages[name] = versions;
-      logInfo(`  ${name}: Handling ${versionEntries.length} versions`);
+      // Add package name to build summary instead of logging
+      buildSummary.addPackageName(name);
       // Sort versions newest first to easily identify the latest
       const sortedVersions = versionEntries.sort(([v1], [v2]) => compareVersions(v1, v2));
 

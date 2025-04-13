@@ -1,5 +1,5 @@
 // ANSI color codes for terminal output
-const Colors = {
+export const Colors = {
   reset: '\x1b[0m',
   bright: '\x1b[1m',
   red: '\x1b[31m',
