@@ -24,7 +24,7 @@ const standaloner = (
   const singlefile = options.singlefile ?? false;
 
   return [
-    defaultExternalsPlugin(options.external),
+    defaultExternalsPlugin(options.external) as Plugin,
     assetRelocatorPlugin({
       outputDir: '.static',
     }),
@@ -74,6 +74,7 @@ const standaloner = (
         if (singlefile) {
           await bundle({
             input: inputPaths[0],
+            plugins: [defaultExternalsPlugin(options.external)],
             output: {
               dir: outDir,
               minify,

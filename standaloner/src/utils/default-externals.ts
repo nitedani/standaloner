@@ -1,4 +1,4 @@
-import type { Plugin } from 'vite';
+import type { Plugin } from 'rolldown';
 
 export { isExternal };
 export { defaultExternalsPlugin };
@@ -408,6 +408,7 @@ const isExternal = (packageId: string) => {
 
 const defaultExternalsPlugin = (external?: (string | RegExp)[]): Plugin => ({
   name: 'standaloner:default-externals',
+  //@ts-ignore
   enforce: 'pre',
   async resolveId(id, importer, options) {
     if (

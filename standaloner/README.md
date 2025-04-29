@@ -50,7 +50,13 @@ import { defineConfig } from 'vite';
 import standaloner from 'standaloner/vite';
 
 export default defineConfig({
-  plugins: [standaloner()] // Uses Vite's build pipeline instead of Rolldown
+  plugins: [standaloner({
+    // Options (all optional)
+    singlefile: false, // Set to true to bundle into a single file
+    minify: false,     // Set to true to minify output
+    trace: true,       // Set to false to disable dependency tracing
+    external: []       // Array of packages to exclude from bundling
+  })] // Uses Vite's build pipeline instead of Rolldown
 });
 ```
 
