@@ -4,7 +4,7 @@ import { build, type BuildOptions, type Plugin } from 'rolldown';
 import { assetRelocatorPlugin } from './relocate.js';
 import { assert } from './utils/utils.js';
 import { externalPatterns } from './utils/default-externals.js';
-
+import { cleanup as cleanup_ } from './utils/cleanup.js';
 /**
  * Options for the bundle function
  */
@@ -86,32 +86,7 @@ export const bundle = async (options: BundleOptions) => {
   const outFilePaths = out.output.map(o => path.join(outputDir, o.fileName));
 
   if (!cleanup) return { ...out, outFilePaths };
-  const bundledModuleIds = out.output.flatMap(o => ('moduleIds' in o ? o.moduleIds : []));
-  const filesToDelete = bundledModuleIds.filter(
-    id => id.startsWith(outputDir) && !outFilePaths.includes(id)
-  );
-
-  // Delete files and collect directories
-  const parentDirs = new Set<string>();
-  for (const file of filesToDelete) {
-    try {
-      fs.unlinkSync(file);
-      parentDirs.add(path.dirname(file));
-    } catch (error) {
-      // Ignore errors
-    }
-  }
-
-  // Delete empty directories
-  for (const dir of parentDirs) {
-    try {
-      if (fs.readdirSync(dir).length === 0) {
-        fs.rmdirSync(dir);
-      }
-    } catch (error) {
-      // Ignore errors
-    }
-  }
+  cleanup_(out, outputDir);
 
   return { ...out, outFilePaths };
 };

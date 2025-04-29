@@ -7,12 +7,24 @@ import { defaultExternalsPlugin } from './utils/default-externals.js';
 import { searchForWorkspaceRoot } from './utils/searchRoot.js';
 import { assertUsage, toPosixPath } from './utils/utils.js';
 import { builtinModules } from 'module';
+import { bundle } from './bundle.js';
 
 export { standaloner as default, standaloner };
 
-const standaloner = (): Plugin[] => {
+const standaloner = (
+  options: {
+    singlefile?: boolean;
+    minify?: boolean;
+    trace?: boolean;
+    external?: (string | RegExp)[];
+  } = {}
+): Plugin[] => {
+  const shouldTrace = options.trace ?? true;
+  const minify = options.minify ?? false;
+  const singlefile = options.singlefile ?? false;
+
   return [
-    defaultExternalsPlugin,
+    defaultExternalsPlugin(options.external),
     assetRelocatorPlugin({
       outputDir: '.static',
     }),
@@ -33,12 +45,13 @@ const standaloner = (): Plugin[] => {
           },
           build: {
             target: 'es2022',
+            minify,
           },
         };
       },
       async writeBundle(_, output) {
         const config = this.environment.config;
-        const outDir = toPosixPath(config.build.outDir);
+        const outDir = toPosixPath(path.join(config.root, config.build.outDir));
         // Get all entry files from the output
         const entries = Object.entries(output)
           .filter(e => 'isEntry' in e[1] && e[1].isEntry)
@@ -49,12 +62,26 @@ const standaloner = (): Plugin[] => {
         // Convert entry filenames to full paths
         const inputPaths = entries.map(entry => path.join(outDir, entry));
 
-        await trace({
-          input: inputPaths,
-          outDir,
-          root: config.root,
-          baseDir: searchForWorkspaceRoot(config.root),
-        });
+        if (shouldTrace) {
+          await trace({
+            input: inputPaths,
+            outDir,
+            root: config.root,
+            baseDir: searchForWorkspaceRoot(config.root),
+          });
+        }
+
+        if (singlefile) {
+          await bundle({
+            input: inputPaths[0],
+            output: {
+              dir: outDir,
+              minify,
+            },
+            root: config.root,
+            cleanup: true,
+          });
+        }
 
         buildSummary.printSummary();
       },

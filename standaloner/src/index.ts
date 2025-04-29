@@ -71,22 +71,11 @@ type StandalonerOptions = {
  */
 const standaloner = async (options: StandalonerOptions) => {
   assertUsage(options.input, 'No input specified');
-
-  // Set verbose mode if specified
   if (options.verbose !== undefined) {
     setVerbose(options.verbose);
   }
-
-  // Resolve bundle options - use empty object if bundle is true or undefined
   const bundleOptions = typeof options.bundle === 'object' ? options.bundle : {};
-
-  // Resolve paths for input, output, and project root
   const { outDir, root, inputPaths, baseDir } = resolvePaths(options);
-
-  // Flatten plugins array to handle both single plugins and arrays
-  const plugins = [bundleOptions.plugins].flat();
-
-  // Determine if we should trace dependencies (default to true)
   const shouldTrace = options.trace ?? true;
 
   // Bundle the input files if bundling is enabled
@@ -95,7 +84,6 @@ const standaloner = async (options: StandalonerOptions) => {
       ? await bundle({
           ...bundleOptions,
           input: options.input,
-          plugins,
           output: {
             ...bundleOptions.output,
             dir: bundleOptions.output?.dir ?? outDir,
