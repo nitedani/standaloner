@@ -89,7 +89,7 @@ const standaloner = (
 
           await bundle({
             input: getInputOption(),
-            plugins: [defaultExternalsPlugin(options.external)],
+            external: options.external,
             output: {
               dir: outDir,
               minify,

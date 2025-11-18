@@ -3,6 +3,7 @@ import { trace } from './trace.js';
 import { resolvePaths } from './utils/resolveOptions.js';
 import { assertUsage } from './utils/utils.js';
 import { setVerbose } from './utils/logging.js';
+import { transformPlugin } from 'rolldown/experimental';
 
 export { standaloner as default, standaloner };
 export type { StandalonerOptions };
@@ -78,23 +79,24 @@ const standaloner = async (options: StandalonerOptions) => {
   const { outDir, root, inputPaths, baseDir } = resolvePaths(options);
   const shouldTrace = options.trace ?? true;
 
-  // Bundle the input files if bundling is enabled
+  const plugins = [bundleOptions.plugins].flat().filter(Boolean);
+  plugins.push(transformPlugin());
+
   const bundleOutput =
     options.bundle !== false
       ? await bundle({
           ...bundleOptions,
+          plugins,
           input: options.input,
           output: {
             ...bundleOptions.output,
             dir: bundleOptions.output?.dir ?? outDir,
           },
-          // Pass cleanup option to delete input files after bundling if specified
           cleanup: options.cleanup,
           root,
         })
       : null;
 
-  // Trace and copy dependencies if tracing is enabled
   if (shouldTrace) {
     await trace({
       // Use bundled output files if available, otherwise use original input paths

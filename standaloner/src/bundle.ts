@@ -1,9 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import { build, type BuildOptions, type Plugin } from 'rolldown';
+import { build, type BuildOptions } from 'rolldown';
 import { assetRelocatorPlugin } from './relocate.js';
 import { assert } from './utils/utils.js';
-import { externalPatterns } from './utils/default-externals.js';
+import { defaultExternalsPlugin } from './utils/default-externals.js';
 import { cleanup as cleanup_ } from './utils/cleanup.js';
 /**
  * Options for the bundle function
@@ -37,26 +37,21 @@ export type BundleOptions = Omit<BuildOptions, 'external'> & {
  * @returns Promise that resolves with information about the bundled files
  */
 export const bundle = async (options: BundleOptions) => {
-  // Validate required options
   assert(options.input, 'No input specified');
   assert(options.output?.dir, 'No output directory specified');
 
-  // Extract options
   const { cleanup, root, ...rest } = options;
 
   // Set up plugins
-  const plugins = [rest.plugins].flat();
-  plugins.push(assetRelocatorPlugin({ outputDir: '.static' }) as Plugin);
-
-  // Combine user-provided externals with default patterns
-  const external = [...(options.external ?? []), ...externalPatterns];
+  const plugins = [rest.plugins].flat().filter(Boolean);
+  plugins.push(assetRelocatorPlugin({ outputDir: '.static' }));
+  plugins.push(defaultExternalsPlugin(options.external));
 
   const out = await build({
     platform: 'node',
     write: true,
     ...rest,
     plugins,
-    external,
     output: {
       inlineDynamicImports: true,
       banner: generateBanner(),

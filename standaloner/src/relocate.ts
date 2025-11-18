@@ -149,91 +149,98 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
       }
     },
 
-    transform(code: string, id: string) {
-      if (!/\.(js|mjs|cjs|ts|tsx|jsx)$/.test(id)) return null;
+    transform: {
+      order: 'post',
+      handler(code: string, id: string) {
+        if (!/\.(js|mjs|cjs|ts|tsx|jsx)$/.test(id)) return null;
 
-      const posixId = toPosixPath(id);
-      const ast = parseCode(this, posixId, code);
-      if (!ast) return null;
+        const posixId = toPosixPath(id);
+        const ast = parseCode(this, posixId, code);
+        if (!ast) return null;
 
-      const dirName = path.dirname(id);
-      const magicString = new MagicString(code);
-      let hasChanges = false;
+        const dirName = path.dirname(id);
+        const magicString = new MagicString(code);
+        let hasChanges = false;
 
-      try {
-        const fileReferences = findFileReferences(ast, dirName, posixId);
+        try {
+          const fileReferences = findFileReferences(ast, dirName, posixId);
 
-        for (const reference of fileReferences) {
-          const { path: filePath, transformInfo } = reference;
-          const absolutePosixPath = filePath ? toPosixPath(path.resolve(dirName, filePath)) : null;
+          for (const reference of fileReferences) {
+            const { path: filePath, transformInfo } = reference;
+            const absolutePosixPath = filePath
+              ? toPosixPath(path.resolve(dirName, filePath))
+              : null;
 
-          if (
-            !absolutePosixPath ||
-            !fs.existsSync(absolutePosixPath) ||
-            !fs.statSync(absolutePosixPath).isFile()
-          ) {
-            if (absolutePosixPath && transformInfo) {
+            if (
+              !absolutePosixPath ||
+              !fs.existsSync(absolutePosixPath) ||
+              !fs.statSync(absolutePosixPath).isFile()
+            ) {
+              if (absolutePosixPath && transformInfo) {
+                logVerbose(
+                  `Skipping non-existent or non-file reference: ${absolutePosixPath} in ${posixId}`
+                );
+              }
+              continue;
+            }
+
+            let source: Buffer;
+            try {
+              source = fs.readFileSync(absolutePosixPath);
+            } catch (readError) {
+              this.warn({
+                code: 'ASSET_READ_ERROR',
+                message: `Failed to read asset ${absolutePosixPath} referenced in ${posixId}: ${
+                  readError instanceof Error ? readError.message : String(readError)
+                }`,
+              });
+              continue;
+            }
+
+            if (transformInfo && 'start' in transformInfo && 'end' in transformInfo) {
+              // Generate unique placeholder ID
+              const placeholderId = `asset_${placeholderCounter++}`;
+
+              // Store asset info for later emission (in renderChunk)
+              assetInfoMap.set(placeholderId, {
+                absolutePath: absolutePosixPath,
+                source,
+                type: transformInfo.type,
+                sourceId: posixId,
+              });
+
+              // Replace with placeholder that will survive tree-shaking
+              magicString.overwrite(
+                transformInfo.start,
+                transformInfo.end,
+                `import.meta.STANDALONER_ASSET_${placeholderId}`
+              );
+              hasChanges = true;
               logVerbose(
-                `Skipping non-existent or non-file reference: ${absolutePosixPath} in ${posixId}`
+                `Prepared asset reference in ${posixId} with placeholder ${placeholderId}`
               );
             }
-            continue;
           }
 
-          let source: Buffer;
-          try {
-            source = fs.readFileSync(absolutePosixPath);
-          } catch (readError) {
-            this.warn({
-              code: 'ASSET_READ_ERROR',
-              message: `Failed to read asset ${absolutePosixPath} referenced in ${posixId}: ${
-                readError instanceof Error ? readError.message : String(readError)
-              }`,
-            });
-            continue;
+          if (hasChanges) {
+            return {
+              code: magicString.toString(),
+              map: magicString.generateMap({ hires: true }) as SourceMapInput,
+            };
           }
-
-          if (transformInfo && 'start' in transformInfo && 'end' in transformInfo) {
-            // Generate unique placeholder ID
-            const placeholderId = `asset_${placeholderCounter++}`;
-
-            // Store asset info for later emission (in renderChunk)
-            assetInfoMap.set(placeholderId, {
-              absolutePath: absolutePosixPath,
-              source,
-              type: transformInfo.type,
-              sourceId: posixId,
-            });
-
-            // Replace with placeholder that will survive tree-shaking
-            magicString.overwrite(
-              transformInfo.start,
-              transformInfo.end,
-              `import.meta.STANDALONER_ASSET_${placeholderId}`
-            );
-            hasChanges = true;
-            logVerbose(`Prepared asset reference in ${posixId} with placeholder ${placeholderId}`);
-          }
+        } catch (err) {
+          this.error({
+            code: 'TRANSFORM_ERROR',
+            id: posixId,
+            message: `Error transforming ${posixId}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+            stack: err instanceof Error ? err.stack : undefined,
+          });
         }
 
-        if (hasChanges) {
-          return {
-            code: magicString.toString(),
-            map: magicString.generateMap({ hires: true }) as SourceMapInput,
-          };
-        }
-      } catch (err) {
-        this.error({
-          code: 'TRANSFORM_ERROR',
-          id: posixId,
-          message: `Error transforming ${posixId}: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-          stack: err instanceof Error ? err.stack : undefined,
-        });
-      }
-
-      return null;
+        return null;
+      },
     },
 
     renderChunk(code, chunk) {
@@ -326,7 +333,9 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
 
         // Calculate relative path from chunk to asset
         const relativePath = path.posix.relative(path.posix.dirname(chunk.fileName), fileName);
-        const relativePathWithDot = relativePath.startsWith('./') ? relativePath : `./${relativePath}`;
+        const relativePathWithDot = relativePath.startsWith('./')
+          ? relativePath
+          : `./${relativePath}`;
 
         // Generate replacement based on type
         let replacement = '';
