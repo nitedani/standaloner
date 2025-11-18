@@ -410,24 +410,27 @@ const defaultExternalsPlugin = (external?: (string | RegExp)[]): Plugin => ({
   name: 'standaloner:default-externals',
   //@ts-ignore
   enforce: 'pre',
-  async resolveId(id, importer, options) {
-    if (
-      isExternal(id) ||
-      (external &&
-        external.some(pattern => (pattern instanceof RegExp ? pattern.test(id) : pattern === id)))
-    ) {
-      // Make sure it's really a .node file
-      if (id.endsWith('.node')) {
-        const resolved = await this.resolve(id, importer, options);
-        if (resolved) {
-          const isNodeFile = resolved.id.endsWith('.node');
-          if (!isNodeFile) {
-            return null;
+  resolveId: {
+    order: 'pre',
+    async handler(id, importer, options) {
+      if (
+        isExternal(id) ||
+        (external &&
+          external.some(pattern => (pattern instanceof RegExp ? pattern.test(id) : pattern === id)))
+      ) {
+        // Make sure it's really a .node file
+        if (id.endsWith('.node')) {
+          const resolved = await this.resolve(id, importer, options);
+          if (resolved) {
+            const isNodeFile = resolved.id.endsWith('.node');
+            if (!isNodeFile) {
+              return null;
+            }
           }
         }
-      }
 
-      return { id, external: true };
-    }
+        return { id, external: true };
+      }
+    },
   },
 });
