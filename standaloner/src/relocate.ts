@@ -17,6 +17,7 @@ interface AssetRelocatorOptions {
 }
 
 const require = createRequire(import.meta.url);
+
 const safeRequireResolve = (
   request: string,
   options?: { paths?: string[] | undefined }
@@ -30,7 +31,6 @@ const safeRequireResolve = (
 
 /** Generates unique filename for emission. */
 const getUniqueAssetName = (desiredName: string, emittedNames: Set<string>): string => {
-  // Use POSIX separators for consistent output filenames regardless of OS
   const sanitizedBase = path.posix
     .basename(toPosixPath(desiredName))
     .replace(/[^a-zA-Z0-9_.-]/g, '_');
@@ -49,83 +49,95 @@ const getUniqueAssetName = (desiredName: string, emittedNames: Set<string>): str
 /** Type of reference found in code */
 type ReferenceType = 'url' | 'path' | 'require' | 'fs' | 'load';
 
-/** Context stored for each emitted asset reference */
-interface ReferenceContext {
+/** Asset information stored during transform phase */
+interface AssetInfo {
+  absolutePath: string;
+  source: Buffer | string;
   type: ReferenceType;
-  sourceId: string; // The module where the reference was found
+  sourceId: string;
 }
 
-/** Simple map to store reference contexts */
-class ReferenceContextMap {
-  private map = new Map<string, ReferenceContext>();
+/** Reference info after emission */
+interface ReferenceInfo {
+  referenceId: string;
+  type: ReferenceType;
+}
 
-  set(referenceId: string, _type: ReferenceType, context: ReferenceContext): void {
-    this.map.set(referenceId, context);
-  }
-
-  getReferenceIds(): string[] {
-    return Array.from(this.map.keys());
-  }
+/**
+ * Interface for file references found in the code
+ */
+interface FileReference {
+  node: Node;
+  parent?: Node | null;
+  path: string;
+  isDynamic?: boolean;
+  transformInfo?: {
+    type: ReferenceType;
+    start: number;
+    end: number;
+  };
 }
 
 /**
  * A Rollup plugin that handles unbundlable assets by:
  * 1. Finding file references in code using AST parsing
- * 2. Copying those files to the output directory
- * 3. Rewriting references uniformly using import.meta.STANDALONER_FILE_URL_
- * 4. Using resolveFileUrl to generate appropriate runtime code (URL or path)
+ * 2. Storing asset info during transform (before tree-shaking)
+ * 3. Only emitting assets that survive tree-shaking in renderChunk
+ * 4. Rewriting references to use appropriate runtime code (URL or path)
  *
  * @param options - Plugin configuration options
  * @returns A Rollup plugin
  */
-
 export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugin {
   const { outputDir = '' } = options;
-
   const emittedNames = new Set<string>();
-  // Track emitted assets to avoid duplicates - maps original path to referenceId
-  const emittedAssets = new Map<string, string>();
-  // Store context for each referenceId and type combination
-  const referenceContextRegistry = new ReferenceContextMap();
-  // Map from referenceId to fileName once it's known
-  const referenceIdToFileName = new Map<string, string>();
+
+  // Store asset info by placeholder ID - populated in transform, used in renderChunk
+  const assetInfoMap = new Map<string, AssetInfo>();
+
+  // Map from placeholderId to referenceId and type (after emission in renderChunk)
+  const placeholderToReferenceId = new Map<string, ReferenceInfo>();
+
+  // Counter for generating unique placeholder IDs
+  let placeholderCounter = 0;
 
   return {
     name: 'asset-relocator',
     enforce: 'post',
     apply: 'build',
+
     applyToEnvironment(environment) {
       return environment.name === 'ssr';
     },
+
     async resolveId(source, importer, options) {
       return (await this.resolve(source, importer, options)) || safeRequireResolve(source);
     },
+
     async load(id: string) {
-      // Skip virtual modules
       if (id.startsWith('\0')) return null;
       const ext = path.extname(id).toLowerCase();
-      // Let Rollup handle JS/TS/JSON files normally
-      if (!['.node'].includes(ext)) {
-        return null;
-      }
+      if (!['.node'].includes(ext)) return null;
 
       try {
         const posixId = toPosixPath(id);
         if (!fs.existsSync(posixId)) return null;
         const stats = fs.statSync(posixId);
         if (!stats.isFile()) return null;
+
         const source = fs.readFileSync(posixId);
-        const referenceId = emitAssetHelper(
-          this,
-          posixId,
+        const placeholderId = `asset_${placeholderCounter++}`;
+
+        // Store asset info for later emission
+        assetInfoMap.set(placeholderId, {
+          absolutePath: posixId,
           source,
-          emittedAssets,
-          emittedNames,
-          outputDir
-        );
-        referenceContextRegistry.set(referenceId, 'load', { type: 'load', sourceId: id });
-        logVerbose(`Loaded asset: ${id} -> referenceId: ${referenceId}`);
-        return `export default import.meta.STANDALONER_FILE_URL_${referenceId}_load;`;
+          type: 'load',
+          sourceId: id,
+        });
+
+        logVerbose(`Prepared asset for load: ${id} -> placeholder: ${placeholderId}`);
+        return `export default import.meta.STANDALONER_ASSET_${placeholderId};`;
       } catch (err) {
         this.warn({
           code: 'ASSET_LOAD_ERROR',
@@ -138,9 +150,8 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
     },
 
     transform(code: string, id: string) {
-      if (!/\.(js|mjs|cjs|ts|tsx|jsx)$/.test(id)) {
-        return null;
-      }
+      if (!/\.(js|mjs|cjs|ts|tsx|jsx)$/.test(id)) return null;
+
       const posixId = toPosixPath(id);
       const ast = parseCode(this, posixId, code);
       if (!ast) return null;
@@ -148,11 +159,14 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
       const dirName = path.dirname(id);
       const magicString = new MagicString(code);
       let hasChanges = false;
+
       try {
         const fileReferences = findFileReferences(ast, dirName, posixId);
+
         for (const reference of fileReferences) {
           const { path: filePath, transformInfo } = reference;
           const absolutePosixPath = filePath ? toPosixPath(path.resolve(dirName, filePath)) : null;
+
           if (
             !absolutePosixPath ||
             !fs.existsSync(absolutePosixPath) ||
@@ -179,43 +193,33 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
             continue;
           }
 
-          const referenceId = emitAssetHelper(
-            this,
-            absolutePosixPath,
-            source,
-            emittedAssets,
-            emittedNames,
-            outputDir
-          );
+          if (transformInfo && 'start' in transformInfo && 'end' in transformInfo) {
+            // Generate unique placeholder ID
+            const placeholderId = `asset_${placeholderCounter++}`;
 
-          if (referenceId && transformInfo && 'start' in transformInfo && 'end' in transformInfo) {
-            // Store the context for this referenceId and type combination
-            referenceContextRegistry.set(referenceId, transformInfo.type, {
+            // Store asset info for later emission (in renderChunk)
+            assetInfoMap.set(placeholderId, {
+              absolutePath: absolutePosixPath,
+              source,
               type: transformInfo.type,
               sourceId: posixId,
             });
 
-            // Record reference in build summary
-            buildSummary.recordReference(posixId, transformInfo.type);
-
-            // Uniformly replace the original code with the Rollup file URL meta property
+            // Replace with placeholder that will survive tree-shaking
             magicString.overwrite(
               transformInfo.start,
               transformInfo.end,
-              `import.meta.STANDALONER_FILE_URL_${referenceId}_${transformInfo.type}`
+              `import.meta.STANDALONER_ASSET_${placeholderId}`
             );
             hasChanges = true;
-
-            logVerbose(
-              `Transformed ${transformInfo.type} reference in ${posixId} to use referenceId ${referenceId}`
-            );
+            logVerbose(`Prepared asset reference in ${posixId} with placeholder ${placeholderId}`);
           }
         }
 
         if (hasChanges) {
           return {
             code: magicString.toString(),
-            map: magicString.generateMap({ hires: true }) as SourceMapInput, // Cast for compatibility
+            map: magicString.generateMap({ hires: true }) as SourceMapInput,
           };
         }
       } catch (err) {
@@ -232,33 +236,86 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
       return null;
     },
 
-    renderStart() {
-      // Map each referenceId to its fileName
-      for (const referenceId of referenceContextRegistry.getReferenceIds()) {
-        const fileName = this.getFileName(referenceId);
-        if (fileName) {
-          referenceIdToFileName.set(referenceId, fileName);
-          logVerbose(`Mapped referenceId ${referenceId} to fileName ${fileName}`);
+    renderChunk(code, chunk) {
+      // Find all placeholders that survived tree-shaking
+      const placeholderPattern = /import\.meta\.STANDALONER_ASSET_(asset_\d+)/g;
+      const survivingPlaceholders = new Set<string>();
+      let match: RegExpExecArray | null;
+
+      while ((match = placeholderPattern.exec(code))) {
+        if (typeof match[1] === 'string') {
+          survivingPlaceholders.add(match[1]);
         }
       }
-    },
 
-    renderChunk(code, chunk) {
-      // Regex to find all import.meta.STANDALONER_FILE_URL_referenceId patterns with their original context
-      const importMetaUrlPattern = /import\.meta\.STANDALONER_FILE_URL_([a-zA-Z0-9$_]+)_(url|path|fs|require|load)/g;
+      if (survivingPlaceholders.size === 0) return null;
 
+      logVerbose(
+        `Found ${survivingPlaceholders.size} surviving asset references in chunk ${chunk.fileName}`
+      );
+
+      // Emit assets ONLY for placeholders that survived tree-shaking
+      const emittedAssets = new Map<string, string>(); // absolutePath -> referenceId for deduplication
+
+      for (const placeholderId of survivingPlaceholders) {
+        const assetInfo = assetInfoMap.get(placeholderId);
+        if (!assetInfo) {
+          this.warn({
+            code: 'MISSING_ASSET_INFO',
+            message: `Missing asset info for placeholder ${placeholderId} in chunk ${chunk.fileName}`,
+          });
+          continue;
+        }
+
+        const { absolutePath, source, type, sourceId } = assetInfo;
+
+        // Deduplicate: if we've already emitted this file, reuse the referenceId
+        let referenceId = emittedAssets.get(absolutePath);
+
+        if (!referenceId) {
+          const assetBasename = getUniqueAssetName(absolutePath, emittedNames);
+          const fileName = outputDir ? path.posix.join(outputDir, assetBasename) : assetBasename;
+
+          referenceId = this.emitFile({
+            type: 'asset',
+            fileName,
+            source,
+          });
+
+          emittedAssets.set(absolutePath, referenceId);
+
+          // Record in build summary
+          try {
+            const stats = fs.statSync(absolutePath);
+            buildSummary.recordAsset(absolutePath, stats.size);
+          } catch {
+            buildSummary.recordAsset(absolutePath, 0);
+          }
+
+          buildSummary.recordReference(sourceId, type);
+          logVerbose(`Emitted asset: ${path.basename(absolutePath)} (used in tree-shaken code)`);
+        }
+
+        placeholderToReferenceId.set(placeholderId, { referenceId, type });
+      }
+
+      // Now replace placeholders with actual code
       const magicString = new MagicString(code);
       let hasChanges = false;
-      let match;
 
-      // Process each match
-      while ((match = importMetaUrlPattern.exec(code))) {
+      placeholderPattern.lastIndex = 0; // Reset regex
+      while ((match = placeholderPattern.exec(code))) {
         const placeholder = match[0];
-        const referenceId = match[1];
-        const type = match[2] as ReferenceType;
+        const placeholderId = match[1];
 
-        assert(referenceId, 'Missing referenceId');
-        const fileName = referenceIdToFileName.get(referenceId);
+        if (typeof placeholderId !== 'string') continue;
+
+        const refInfo = placeholderToReferenceId.get(placeholderId);
+        if (!refInfo) continue;
+
+        const { referenceId, type } = refInfo;
+        const fileName = this.getFileName(referenceId);
+
         if (!fileName) {
           this.warn({
             code: 'MISSING_FILENAME',
@@ -267,15 +324,12 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
           continue;
         }
 
-        // Calculate the relative path from the chunk to the asset
+        // Calculate relative path from chunk to asset
         const relativePath = path.posix.relative(path.posix.dirname(chunk.fileName), fileName);
-        const relativePathWithDot = relativePath.startsWith('./')
-          ? relativePath
-          : `./${relativePath}`;
+        const relativePathWithDot = relativePath.startsWith('./') ? relativePath : `./${relativePath}`;
 
-        // Generate replacement based on the reference type that was captured in the placeholder
+        // Generate replacement based on type
         let replacement = '';
-
         if (type === 'url') {
           replacement = `new URL(${JSON.stringify(relativePathWithDot)}, import.meta.url)`;
         } else if (type === 'path' || type === 'fs') {
@@ -286,10 +340,7 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
           assert(false, `Unknown reference type: ${type}`);
         }
 
-        logVerbose(
-          `In chunk ${chunk.fileName}, replaced ${placeholder} with ${replacement} (type: ${type})`
-        );
-
+        logVerbose(`Replaced ${placeholder} with ${replacement} (type: ${type})`);
         magicString.overwrite(match.index, match.index + placeholder.length, replacement);
         hasChanges = true;
       }
@@ -304,102 +355,31 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
   };
 }
 
-/**
- * Interface for file references found in the code
- */
-interface FileReference {
-  node: Node;
-  parent?: Node | null;
-  path: string; // Path string extracted from the code (might be relative)
-  isDynamic?: boolean;
-  transformInfo?: {
-    type: ReferenceType;
-    start: number;
-    end: number;
-  };
-}
-
-/**
- * Helper to emit an asset and get the reference ID, handling deduplication.
- */
-function emitAssetHelper(
-  context: PluginContext,
-  absolutePosixPath: string,
-  source: string | Uint8Array,
-  emittedAssets: Map<string, string>,
-  emittedNames: Set<string>,
-  outputDir: string
-): string {
-  try {
-    if (emittedAssets.has(absolutePosixPath)) {
-      return emittedAssets.get(absolutePosixPath)!;
-    }
-
-    const assetBasename = getUniqueAssetName(absolutePosixPath, emittedNames);
-    const fileName = outputDir ? path.posix.join(outputDir, assetBasename) : assetBasename;
-
-    const referenceId = context.emitFile({
-      type: 'asset',
-      fileName,
-      source,
-    });
-
-    emittedAssets.set(absolutePosixPath, referenceId);
-
-    // Record asset in build summary
-    try {
-      const stats = fs.statSync(absolutePosixPath);
-      buildSummary.recordAsset(absolutePosixPath, stats.size);
-    } catch (e) {
-      // If we can't get the file size, just record it with size 0
-      buildSummary.recordAsset(absolutePosixPath, 0);
-    }
-
-    logVerbose(`Emitted asset: ${path.basename(absolutePosixPath)} -> ${fileName}`);
-    return referenceId;
-  } catch (err) {
-    context.warn({
-      code: 'ASSET_EMISSION_ERROR',
-      message: `Failed to emit asset ${absolutePosixPath}: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    });
-    throw err;
-  }
-}
-
 // --- AST Analysis Functions ---
-// (Largely similar to the previous version, but ensure `transformInfo.type` is set correctly)
 
 /**
  * Find all file references in an AST
  */
 function findFileReferences(ast: Program, dirName: string, sourceId: string): FileReference[] {
   const references: FileReference[] = [];
-  const processedNodes = new WeakSet<Node>(); // Avoid reprocessing the same node
+  const processedNodes = new WeakSet<Node>();
 
   walk(ast, {
     enter: (node: Node, parent: Node | null) => {
-      if (processedNodes.has(node)) return; // Skip already processed nodes
+      if (processedNodes.has(node)) return;
 
       let ref: FileReference[] | null = null;
 
-      // Check for new URL('./path', import.meta.url)
       if (isNewURLNode(node)) {
         ref = processNewURLNode(node as NewExpression, dirName);
-      }
-      // Check for path.join(__dirname, './path') or process.cwd() based paths
-      else if (isPathJoinOperation(node)) {
+      } else if (isPathJoinOperation(node)) {
         ref = processPathJoinOperation(node as CallExpression, dirName);
-      }
-      // Check for require('./asset.ext')
-      else if (isRequireCall(node)) {
+      } else if (isRequireCall(node)) {
         ref = processRequireCall(node as CallExpression, dirName);
-      }
-      // Check for fs.someFunc('./path')
-      else if (isFsOperation(node)) {
+      } else if (isFsOperation(node)) {
         ref = processFsOperation(node as CallExpression, dirName);
       }
+
       if (ref?.length) {
         processedNodes.add(node);
         references.push(...ref);
@@ -420,7 +400,7 @@ function isNewURLNode(node: Node): node is NewExpression {
     node.arguments[1]?.type === 'MemberExpression' &&
     node.arguments[1].object.type === 'MetaProperty' &&
     (node.arguments[1].object.meta.name === 'import' ||
-      node.arguments[1].object.meta.name === 'new') && // import.meta or new.target
+      node.arguments[1].object.meta.name === 'new') &&
     node.arguments[1].object.property.name === 'meta' &&
     node.arguments[1].property.type === 'Identifier' &&
     node.arguments[1].property.name === 'url' &&
@@ -441,8 +421,6 @@ function processNewURLNode(node: NewExpression, dirName: string): FileReference[
   }
 
   if (filePath !== null) {
-    // Basic check for relative/absolute paths that might be assets
-    // More sophisticated checks might be needed (e.g., avoid http:// urls)
     if (filePath.startsWith('.') || path.isAbsolute(filePath)) {
       assert(
         'start' in node &&
@@ -453,11 +431,11 @@ function processNewURLNode(node: NewExpression, dirName: string): FileReference[
       );
       return [
         {
-          node: urlPathArg, // Reference the argument node for potential processing
+          node: urlPathArg,
           path: filePath,
           transformInfo: {
-            type: 'url', // Context is a URL
-            start: node.start, // Replace the entire `new URL(...)` expression
+            type: 'url',
+            start: node.start,
             end: node.end,
           },
         },
@@ -482,7 +460,6 @@ function isPathJoinOperation(node: Node): node is CallExpression {
 
 /** Process path.join() */
 function processPathJoinOperation(node: CallExpression, dirName: string): FileReference[] | null {
-  // Simplistic: assumes path.join(__dirname | process.cwd(), 'relative/path')
   const basePathNode = node.arguments[0];
   const relativePathNode = node.arguments[1];
 
@@ -501,7 +478,6 @@ function processPathJoinOperation(node: CallExpression, dirName: string): FileRe
   }
 
   if (filePath !== null && (filePath.startsWith('.') || !path.isAbsolute(filePath))) {
-    // Ensure it's meant to be relative
     assert(
       'start' in node &&
         typeof node.start === 'number' &&
@@ -514,8 +490,8 @@ function processPathJoinOperation(node: CallExpression, dirName: string): FileRe
         node: relativePathNode,
         path: filePath,
         transformInfo: {
-          type: 'path', // Context is a file path
-          start: node.start, // Replace the entire path.join(...) expression
+          type: 'path',
+          start: node.start,
           end: node.end,
         },
       },
@@ -536,7 +512,6 @@ function isBasePathArgument(node: Node): boolean {
     node.callee.property.name === 'cwd'
   )
     return true;
-  // Could add import.meta.dirname (if using a polyfill/transform)
   return false;
 }
 
@@ -583,7 +558,7 @@ function processRequireCall(node: CallExpression, dirName: string): FileReferenc
       path: modulePath,
       transformInfo: {
         type: 'require',
-        start: node.start, // Replace the entire require(...) expression
+        start: node.start,
         end: node.end,
       },
     },
@@ -596,13 +571,12 @@ function isFsOperation(node: Node): node is CallExpression {
 
   const callee = node.callee;
   if (callee.type !== 'MemberExpression') return false;
-  if (callee.property.type !== 'Identifier') return false; // fs['readFile'] not handled simply
+  if (callee.property.type !== 'Identifier') return false;
 
-  // Check for direct fs.method()
   if (callee.object.type === 'Identifier' && callee.object.name === 'fs') {
     return true;
   }
-  // Check for require('fs').method()
+
   if (
     callee.object.type === 'CallExpression' &&
     callee.object.callee.type === 'Identifier' &&
@@ -613,16 +587,15 @@ function isFsOperation(node: Node): node is CallExpression {
   ) {
     return true;
   }
-  // Could add checks for imported fs variables `import * as fs from 'fs'; fs.readFile(...)`
+
   return false;
 }
 
 /** Process fs operation */
 function processFsOperation(node: CallExpression, dirName: string): FileReference[] | null {
-  const callee = node.callee as MemberExpression; // Already checked in isFsOperation
-  const fsFunction = (callee.property as acorn.Identifier).name; // Already checked
+  const callee = node.callee as MemberExpression;
+  const fsFunction = (callee.property as acorn.Identifier).name;
 
-  // List of fs functions where the first arg is commonly a path
   const pathTakingFuncs = [
     'readFile',
     'readFileSync',
@@ -671,12 +644,10 @@ function processFsOperation(node: CallExpression, dirName: string): FileReferenc
   } else if (pathArg.type === 'TemplateLiteral' && pathArg.expressions.length === 0) {
     filePath = pathArg.quasis[0]?.value.cooked || null;
   } else if (pathArg.type === 'Identifier' && pathArg.name === '__filename') {
-    // Special case: fs operation on the file itself. Don't treat as external asset.
     return null;
   }
 
   if (filePath !== null && (filePath.startsWith('.') || path.isAbsolute(filePath))) {
-    // We found a potential file path used with fs.
     assert(
       'start' in pathArg &&
         typeof pathArg.start === 'number' &&
@@ -686,11 +657,11 @@ function processFsOperation(node: CallExpression, dirName: string): FileReferenc
     );
     return [
       {
-        node: pathArg, // The path argument node itself
+        node: pathArg,
         path: filePath,
         transformInfo: {
-          type: 'fs', // Context is fs path
-          start: pathArg.start, // Replace *only the path argument*
+          type: 'fs',
+          start: pathArg.start,
           end: pathArg.end,
         },
       },
@@ -700,10 +671,9 @@ function processFsOperation(node: CallExpression, dirName: string): FileReferenc
   return null;
 }
 
-function parseCode(context: PluginContext, posixId: string, code: string) {
+function parseCode(context: PluginContext, posixId: string, code: string): Program | null {
   let ast: Program;
   try {
-    // Attempt parsing as module first
     ast = acorn.parse(code, {
       ecmaVersion: 'latest',
       sourceType: 'module',
@@ -712,7 +682,6 @@ function parseCode(context: PluginContext, posixId: string, code: string) {
     }) as unknown as Program;
   } catch (moduleError) {
     try {
-      // Fallback to script parsing if module fails
       ast = acorn.parse(code, {
         ecmaVersion: 'latest',
         sourceType: 'script',

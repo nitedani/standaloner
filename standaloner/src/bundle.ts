@@ -58,20 +58,8 @@ export const bundle = async (options: BundleOptions) => {
     plugins,
     external,
     output: {
-      target: 'es2022',
       inlineDynamicImports: true,
       banner: generateBanner(),
-      // advancedChunks: {
-      //   groups: [
-      //     {
-      //       name: 'rolldown-fix',
-      //       test: /rolldown:module/,
-      //     },
-      //     {
-      //       name: 'rest',
-      //     },
-      //   ],
-      // },
       ...(rest.output || {}),
     },
 
