@@ -60,6 +60,8 @@ export const bundle = async (options: BundleOptions) => {
     output: {
       inlineDynamicImports: true,
       banner: generateBanner(),
+      entryFileNames: '[name].mjs',
+      chunkFileNames: '[name]-[hash].mjs',
       ...(rest.output || {}),
     },
 
