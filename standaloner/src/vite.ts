@@ -46,7 +46,7 @@ const standaloner = (
           },
           build: {
             target: 'es2022',
-            minify,
+            minify: minify && !singlefile,
           },
         };
       },
@@ -93,6 +93,7 @@ const standaloner = (
             output: {
               dir: outDir,
               minify,
+              sourcemap: config.build.sourcemap,
             },
             root: config.root,
             cleanup: true,

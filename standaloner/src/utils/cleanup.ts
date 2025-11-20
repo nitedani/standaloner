@@ -15,6 +15,10 @@ export function cleanup(out: RolldownOutput | RollupOutput, outputDir: string) {
   for (const file of filesToDelete) {
     try {
       fs.unlinkSync(file);
+      const mapFile = `${file}.map`;
+      if (fs.existsSync(mapFile)) {
+        fs.unlinkSync(mapFile);
+      }
       parentDirs.add(path.dirname(file));
     } catch (error) {
       // Ignore errors

@@ -385,6 +385,9 @@ const externalPatterns = [
   /.*-win32\.node$/,
   /.*-linux\.node$/,
   /.*-prebuilds\/.*$/, // Prebuilt binaries directory
+
+  // Known broken CSJ packages
+  /^prettier$/, // Code formatter
 ];
 
 // Convert the array of regex patterns into a single combined regex
