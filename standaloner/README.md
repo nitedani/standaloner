@@ -52,7 +52,7 @@ import standaloner from 'standaloner/vite';
 export default defineConfig({
   plugins: [standaloner({
     // Options (all optional)
-    singlefile: false, // Set to true to bundle into a single file
+    bundle: false,     // Set to true to bundle into a single file
     minify: false,     // Set to true to minify output
     trace: true,       // Set to false to disable dependency tracing
     external: []       // Array of packages to exclude from bundling

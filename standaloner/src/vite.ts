@@ -8,21 +8,25 @@ import { searchForWorkspaceRoot } from './utils/searchRoot.js';
 import { assertUsage, toPosixPath } from './utils/utils.js';
 import { builtinModules } from 'module';
 import { bundle } from './bundle.js';
-import { logWarning } from './utils/logging.js';
+import { logWarning, setVerbose } from './utils/logging.js';
 
 export { standaloner as default, standaloner };
 
 const standaloner = (
   options: {
-    singlefile?: boolean | string;
+    bundle?: boolean | string;
     minify?: boolean;
     trace?: boolean;
     external?: (string | RegExp)[];
+    verbose?: boolean;
   } = {}
 ): Plugin[] => {
+  if (options.verbose) {
+    setVerbose(true);
+  }
   const shouldTrace = options.trace ?? true;
   const minify = options.minify ?? false;
-  const singlefile = options.singlefile ?? false;
+  const bundle_ = options.bundle ?? false;
 
   return [
     defaultExternalsPlugin(options.external) as Plugin,
@@ -46,7 +50,7 @@ const standaloner = (
           },
           build: {
             target: 'es2022',
-            minify: minify && !singlefile,
+            minify: minify && !bundle_,
           },
         };
       },
@@ -74,17 +78,17 @@ const standaloner = (
           });
         }
 
-        if (singlefile) {
+        if (bundle_) {
           function getInputOption() {
-            const singleFileEntryName = typeof singlefile === 'string' ? singlefile : 'index';
-            const singleFileEntry = entries.find(e => e.name === singleFileEntryName);
-            if (!singleFileEntry) {
+            const bundleEntryName = typeof bundle_ === 'string' ? bundle_ : 'index';
+            const bundleEntry = entries.find(e => e.name === bundleEntryName);
+            if (!bundleEntry) {
               logWarning(
-                `Could not find '${singleFileEntryName}' entry for singlefile bundling. Bundling all entries. To fix this, specify an existing entry name as the 'singlefile' option.`
+                `Could not find '${bundleEntryName}' entry for bundling. Bundling all entries. To fix this, specify an existing entry name in the 'bundle' option.`
               );
               return outPaths;
             }
-            return [singleFileEntry.outPath];
+            return [bundleEntry.outPath];
           }
 
           await bundle({

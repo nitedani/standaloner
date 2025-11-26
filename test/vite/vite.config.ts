@@ -8,7 +8,7 @@ export default {
     vike(),
     telefunc(),
     standaloner({
-      singlefile: true,
+      bundle: true,
       minify: true,
     }),
   ],
