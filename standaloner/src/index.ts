@@ -3,7 +3,7 @@ import { trace } from './trace.js';
 import { resolvePaths } from './utils/resolveOptions.js';
 import { assertUsage } from './utils/utils.js';
 import { setVerbose } from './utils/logging.js';
-import { transformPlugin } from 'rolldown/experimental';
+import { viteTransformPlugin } from 'rolldown/experimental';
 
 export { standaloner as default, standaloner };
 export type { StandalonerOptions };
@@ -80,7 +80,7 @@ const standaloner = async (options: StandalonerOptions) => {
   const shouldTrace = options.trace ?? true;
 
   const plugins = [bundleOptions.plugins].flat().filter(Boolean);
-  plugins.push(transformPlugin());
+  plugins.push(viteTransformPlugin());
 
   const bundleOutput =
     options.bundle !== false

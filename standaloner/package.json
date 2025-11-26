@@ -20,8 +20,7 @@
         "acorn": "^8.15.0",
         "estree-walker": "^3.0.3",
         "magic-string": "^0.30.21",
-        "rolldown": "1.0.0-beta.50",
-        "rollup-pluginutils": "^2.8.2"
+        "rolldown": "1.0.0-beta.51"
     },
     "devDependencies": {
         "typescript": "^5.9.3",

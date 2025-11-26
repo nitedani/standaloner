@@ -5,7 +5,7 @@ import MagicString from 'magic-string';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { type PluginContext, type SourceMapInput } from 'rollup';
+import type { PluginContext, SourceMapInput } from 'rollup';
 import type { Plugin } from 'vite';
 import buildSummary from './utils/buildSummary.js';
 import { logVerbose } from './utils/logging.js';
