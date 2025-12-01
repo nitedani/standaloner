@@ -7,14 +7,14 @@ import { defaultExternalsPlugin } from './utils/default-externals.js';
 import { searchForWorkspaceRoot } from './utils/searchRoot.js';
 import { assertUsage, toPosixPath } from './utils/utils.js';
 import { builtinModules } from 'module';
-import { bundle } from './bundle.js';
+import { bundle, type BundleOptions } from './bundle.js';
 import { logWarning, setVerbose } from './utils/logging.js';
 
 export { standaloner as default, standaloner };
 
 const standaloner = (
   options: {
-    bundle?: boolean | string;
+    bundle?: boolean | string | Omit<BundleOptions, 'root' | 'external' | 'output' | 'cleanup'>;
     minify?: boolean;
     trace?: boolean;
     external?: (string | RegExp)[];
@@ -80,7 +80,7 @@ const standaloner = (
 
         if (bundle_) {
           function getInputOption() {
-            const bundleEntryName = typeof bundle_ === 'string' ? bundle_ : 'index';
+            const bundleEntryName = typeof bundle_ === 'object' && typeof bundle_.input === 'string' ? bundle_.input :  typeof bundle_ === 'string' ? bundle_ : 'index';
             const bundleEntry = entries.find(e => e.name === bundleEntryName);
             if (!bundleEntry) {
               logWarning(
@@ -91,7 +91,9 @@ const standaloner = (
             return [bundleEntry.outPath];
           }
 
+          const bundleOptions = typeof bundle_ === 'object' ? bundle_ : {};
           await bundle({
+            ...bundleOptions,
             input: getInputOption(),
             external: options.external,
             output: {

@@ -1,4 +1,3 @@
-import fs from 'fs';
 import path from 'path';
 import { build, type BuildOptions } from 'rolldown';
 import { assetRelocatorPlugin } from './relocate.js';
