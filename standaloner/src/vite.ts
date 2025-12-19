@@ -37,10 +37,10 @@ const standaloner = (
       name: 'standaloner',
       apply: 'build',
       applyToEnvironment(environment) {
-        return environment.name !== 'client';
+        return environment.config.consumer !== 'client';
       },
-      configEnvironment(name) {
-        if (name === 'client') {
+      configEnvironment(_name, config) {
+        if (config.consumer === 'client') {
           return;
         }
         return {
@@ -56,7 +56,7 @@ const standaloner = (
       },
       async writeBundle(_, output) {
         const config = this.environment.config;
-        const outDir = toPosixPath(path.join(config.root, config.build.outDir));
+        const outDir = toPosixPath(path.isAbsolute(config.build.outDir) ? config.build.outDir : path.join(config.root, config.build.outDir));
         // Get all entry files from the output
         const entries = Object.entries(output)
           .filter(e => 'isEntry' in e[1] && e[1].isEntry)
