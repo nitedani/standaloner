@@ -14,7 +14,7 @@ export { standaloner as default, standaloner };
 
 const standaloner = (
   options: {
-    bundle?: boolean | string | Omit<BundleOptions, 'root' | 'external' | 'output' | 'cleanup'>;
+    bundle?: boolean | string | Omit<BundleOptions, 'root' | 'external' | 'cleanup'>;
     minify?: boolean;
     trace?: boolean;
     external?: (string | RegExp)[];
@@ -99,6 +99,7 @@ const standaloner = (
             input,
             external: options.external,
             output: {
+              ...bundleOptions.output,
               dir: outDir,
               minify,
               sourcemap: config.build.sourcemap,
