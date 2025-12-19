@@ -1,5 +1,5 @@
 import path from 'path';
-import type { Plugin } from 'vite';
+import { normalizePath, type Plugin } from 'vite';
 import { assetRelocatorPlugin } from './relocate.js';
 import { trace } from './trace.js';
 import buildSummary from './utils/buildSummary.js';
@@ -92,9 +92,11 @@ const standaloner = (
           }
 
           const bundleOptions = typeof bundle_ === 'object' ? bundle_ : {};
+          // Input to object, so that entries are written at the same place
+          const input = Object.fromEntries(getInputOption().map(e => [removeExtension(pathRelativeTo(e, outDir)), e]));
           await bundle({
             ...bundleOptions,
-            input: getInputOption(),
+            input,
             external: options.external,
             output: {
               dir: outDir,
@@ -111,3 +113,12 @@ const standaloner = (
     } satisfies Plugin,
   ];
 };
+
+export function pathRelativeTo(filePath: string, rel: string): string {
+  return normalizePath(path.relative(normalizePath(path.resolve(rel)), path.resolve(filePath)));
+}
+
+
+export function removeExtension(subject: string) {
+  return subject.replace(/\.[^/.]+$/, "");
+}
