@@ -1,4 +1,4 @@
-import path from 'path';
+import path from 'node:path';
 import { build, type BuildOptions } from 'rolldown';
 import { assetRelocatorPlugin } from './relocate.js';
 import { assert } from './utils/utils.js';
@@ -76,9 +76,9 @@ export const bundle = async (options: BundleOptions) => {
 };
 function generateBanner() {
   return [
-    "import { dirname as dirname987 } from 'path';",
-    "import { fileURLToPath as fileURLToPath987 } from 'url';",
-    "import { createRequire as createRequire987 } from 'module';",
+    "import { dirname as dirname987 } from 'node:path';",
+    "import { fileURLToPath as fileURLToPath987 } from 'node:url';",
+    "import { createRequire as createRequire987 } from 'node:module';",
     'var require = createRequire987(import.meta.url);',
     'var __filename = fileURLToPath987(import.meta.url);',
     'var __dirname = dirname987(__filename);',

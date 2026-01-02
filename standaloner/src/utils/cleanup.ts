@@ -1,7 +1,7 @@
 import type { RolldownOutput } from 'rolldown';
 import type { RollupOutput } from 'rollup';
-import path from 'path';
-import fs from 'fs';
+import path from 'node:path';
+import fs from 'node:fs';
 
 export function cleanup(out: RolldownOutput | RollupOutput, outputDir: string) {
   const outFilePaths = out.output.map(o => path.join(outputDir, o.fileName));

@@ -1,4 +1,4 @@
-import path from 'path';
+import path from 'node:path';
 import { normalizePath, type Plugin } from 'vite';
 import { assetRelocatorPlugin } from './relocate.js';
 import { trace } from './trace.js';
@@ -6,7 +6,7 @@ import buildSummary from './utils/buildSummary.js';
 import { defaultExternalsPlugin } from './utils/default-externals.js';
 import { searchForWorkspaceRoot } from './utils/searchRoot.js';
 import { assertUsage, toPosixPath } from './utils/utils.js';
-import { builtinModules } from 'module';
+import { builtinModules } from 'node:module';
 import { bundle, type BundleOptions } from './bundle.js';
 import { logWarning, setVerbose } from './utils/logging.js';
 
