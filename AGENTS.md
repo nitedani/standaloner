@@ -54,7 +54,11 @@ This runs TypeScript in watch mode (`tsc -w`).
 
 ### 3. Testing
 
-**There are no automated unit/integration tests.** The `test/` directory contains example packages for manual testing that demonstrate usage:
+**Automated CI Tests:** The repository has GitHub Actions CI configured that runs on pull requests to main. The CI performs:
+- TypeScript compilation and build validation
+- Vite integration test execution (`node test.js`)
+
+**Manual Testing:** The `test/` directory contains example packages for manual testing that demonstrate usage:
 - `test/package1/` - Basic package with lodash dependency
 - `test/package2/` - Package with different lodash version (demonstrating multi-version handling)
 - `test/vite/` - Full Vite SSR application using standaloner plugin
@@ -207,7 +211,19 @@ The `test/vite` package includes Prisma:
 
 ### CI/CD
 
-**No GitHub Actions workflows exist** in this repository. No automated CI/CD is configured.
+**GitHub Actions CI is configured** in `.github/workflows/ci.yml`. The workflow:
+- Runs on pull requests to the main branch only
+- Uses Node.js v20.x with pnpm package manager
+- Performs the following checks:
+  1. Enables corepack for pnpm version management
+  2. Installs dependencies with `pnpm install`
+  3. Builds all packages with `pnpm build` (compiles TypeScript and builds test packages)
+  4. Runs the Vite integration test (`node test.js` in the test/vite directory)
+
+**Expected CI Run Time:** ~1-2 minutes total
+- Setup and dependency installation: ~30-45 seconds
+- Build: ~8-10 seconds
+- Tests: ~5-10 seconds
 
 ## Making Changes
 
