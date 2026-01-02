@@ -16,7 +16,7 @@
         "dev": "tsc -w"
     },
     "dependencies": {
-        "@vercel/nft": "^0.30.4",
+        "@vercel/nft": "^1.1.1",
         "acorn": "^8.15.0",
         "estree-walker": "^3.0.3",
         "magic-string": "^0.30.21",
