@@ -55,7 +55,8 @@ export default defineConfig({
     bundle: false,     // Set to true to bundle into a single file
     minify: false,     // Set to true to minify output
     trace: true,       // Set to false to disable dependency tracing
-    external: []       // Array of packages to exclude from bundling
+    external: [],      // Array of packages to exclude from bundling
+    isolated: false    // Set to true to build each entry separately without shared chunks
   })] // Uses Vite's build pipeline instead of Rolldown
 });
 ```
@@ -65,17 +66,29 @@ export default defineConfig({
 - **SSR Applications**: Build with Vite and deploy the self-contained output
 - **Native Dependencies**: Use modules that can't be bundled without special configuration
 - **Microservices**: Create standalone deployable units for each service
+- **Serverless Functions**: Build isolated, self-contained functions for Vercel, AWS Lambda, or similar platforms
 
 ## Configuration Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `input` | `string \| string[]` | - | Input file(s) to process |
+| `input` | `string \| string[] \| object` | - | Input file(s) to process. Can be a single file path, array of paths, or object with named entries |
 | `outDir` | `string` | `'<inputDir>/dist'` | Output directory |
-| `bundle` | `boolean \| object` | `true` | Bundle options or disable bundling |
+| `bundle` | `boolean \| object` | `true` | Bundle options or disable bundling. See Advanced Options for object properties |
 | `trace` | `boolean` | `true` | Whether to trace dependencies |
 | `cleanup` | `boolean` | `false` | Delete input files after processing |
 | `verbose` | `boolean` | `false` | Enable verbose logging |
+
+### Bundle Options
+
+When `bundle` is an object, it supports these additional properties:
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `external` | `(string \| RegExp)[]` | `[]` | Packages to exclude from bundling |
+| `plugins` | `Plugin[]` | `[]` | Rolldown plugins to apply |
+| `output` | `object` | - | Rolldown output options (e.g., `format`, `sourcemap`) |
+| `isolated` | `boolean` | `false` | Build each entry separately without shared chunks |
 
 ### Advanced Options
 
@@ -91,10 +104,38 @@ await standaloner({
     plugins: [myPlugin()],
 
     // Output options
-    output: { format: 'esm' }
+    output: { format: 'esm' },
+
+    // Build each entry separately (useful for serverless functions)
+    isolated: true
   }
 });
 ```
+
+#### Isolated Builds
+
+For serverless deployments (e.g., Vercel, AWS Lambda) where each function must be completely self-contained:
+
+```javascript
+await standaloner({
+  input: {
+    functionA: 'src/functionA.js',
+    functionB: 'src/functionB.js',
+    functionC: 'src/functionC.js'
+  },
+  outDir: 'dist',
+  bundle: {
+    isolated: true  // Each function becomes a standalone bundle without shared chunks
+  }
+});
+```
+
+When `isolated: true`:
+- Each entry point is bundled separately
+- No shared chunks are created between entry points
+- Each output file is completely self-contained
+- Builds run concurrently for better performance
+- Ideal for serverless functions that need independent deployment
 
 
 ## How It Works

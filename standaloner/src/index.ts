@@ -32,7 +32,10 @@ type StandalonerOptions = {
    */
   bundle?:
     | boolean
-    | (Omit<BundleOptions, 'input' | 'root' | 'external'> & { external?: (string | RegExp)[] });
+    | (Omit<BundleOptions, 'input' | 'root' | 'external'> & {
+        external?: (string | RegExp)[];
+        isolated?: boolean;
+      });
 
   /**
    * Whether to trace and copy dependencies:

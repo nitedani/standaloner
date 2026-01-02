@@ -1,4 +1,4 @@
-import path from 'path';
+import path from 'node:path';
 import type { StandalonerOptions } from 'src/index.js';
 import { searchForPackageRoot, searchForWorkspaceRoot } from './searchRoot.js';
 import { assertUsage, findCommonAncestor, resolveInputs } from './utils.js';
