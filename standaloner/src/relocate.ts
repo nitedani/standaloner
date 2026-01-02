@@ -470,23 +470,48 @@ function isPathJoinOperation(node: Node): node is CallExpression {
 /** Process path.join() */
 function processPathJoinOperation(node: CallExpression, dirName: string): FileReference[] | null {
   const basePathNode = node.arguments[0];
-  const relativePathNode = node.arguments[1];
-
-  if (!basePathNode || !relativePathNode || !isBasePathArgument(basePathNode)) {
+  
+  if (!basePathNode || !isBasePathArgument(basePathNode)) {
     return null;
   }
 
-  let filePath: string | null = null;
-  if (relativePathNode.type === 'Literal' && typeof relativePathNode.value === 'string') {
-    filePath = relativePathNode.value;
-  } else if (
-    relativePathNode.type === 'TemplateLiteral' &&
-    relativePathNode.expressions.length === 0
-  ) {
-    filePath = relativePathNode.quasis[0]?.value.cooked || null;
+  // Handle path.join with multiple arguments beyond the base path
+  // e.g., path.join(__dirname, 'data', 'file.csv') or path.join(__dirname, 'file.txt')
+  if (node.arguments.length < 2) {
+    return null;
   }
 
-  if (filePath !== null && (filePath.startsWith('.') || !path.isAbsolute(filePath))) {
+  // Collect all path segments after the base path
+  const pathSegments: string[] = [];
+  for (let i = 1; i < node.arguments.length; i++) {
+    const arg = node.arguments[i];
+    if (!arg) continue;
+
+    let segment: string | null = null;
+    if (arg.type === 'Literal' && typeof arg.value === 'string') {
+      segment = arg.value;
+    } else if (arg.type === 'TemplateLiteral' && arg.expressions.length === 0) {
+      segment = arg.quasis[0]?.value.cooked || null;
+    }
+
+    if (segment === null) {
+      // If any segment is dynamic, we can't detect this asset statically
+      return null;
+    }
+
+    pathSegments.push(segment);
+  }
+
+  if (pathSegments.length === 0) {
+    return null;
+  }
+
+  // Join all segments to create the full relative path
+  // Use path.join (not path.posix.join) to respect platform-specific separators
+  // Then convert to POSIX for internal consistency in asset tracking
+  const filePath = toPosixPath(path.join(...pathSegments));
+
+  if (filePath && (filePath.startsWith('.') || !path.isAbsolute(filePath))) {
     assert(
       'start' in node &&
         typeof node.start === 'number' &&
@@ -494,9 +519,14 @@ function processPathJoinOperation(node: CallExpression, dirName: string): FileRe
         typeof node.end === 'number',
       'Node requires start/end'
     );
+    
+    // Use first path segment node for reference (already validated to exist)
+    const firstSegmentNode = node.arguments[1];
+    assert(firstSegmentNode, 'First path segment node must exist');
+    
     return [
       {
-        node: relativePathNode,
+        node: firstSegmentNode,
         path: filePath,
         transformInfo: {
           type: 'path',
