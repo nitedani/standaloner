@@ -16,7 +16,7 @@
         "dev": "tsc -w"
     },
     "dependencies": {
-        "@vercel/nft": "^0.30.3",
+        "@vercel/nft": "^0.30.4",
         "acorn": "^8.15.0",
         "estree-walker": "^3.0.3",
         "magic-string": "^0.30.21",
@@ -25,9 +25,9 @@
     },
     "devDependencies": {
         "@types/estree": "^1.0.8",
-        "rollup": "^4.53.2",
+        "rollup": "^4.54.0",
         "typescript": "^5.9.3",
-        "vite": "^7.2.2"
+        "vite": "^7.3.0"
     },
     "files": [
         "dist/"
