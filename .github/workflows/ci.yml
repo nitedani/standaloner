@@ -30,3 +30,7 @@ jobs:
       - name: Run Vite test
         working-directory: test/vite
         run: node test.js
+
+      - name: Run isolated build test
+        working-directory: test/isolated
+        run: node test.js
