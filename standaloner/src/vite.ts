@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { Plugin } from 'vite';
+import { normalizePath, type Plugin } from 'vite';
 import { assetRelocatorPlugin } from './relocate.js';
 import { trace } from './trace.js';
 import buildSummary from './utils/buildSummary.js';
@@ -14,7 +14,7 @@ export { standaloner as default, standaloner };
 
 const standaloner = (
   options: {
-    bundle?: boolean | string | Omit<BundleOptions, 'root' | 'external' | 'output' | 'cleanup'>;
+    bundle?: boolean | string | Omit<BundleOptions, 'root' | 'external' | 'cleanup'>;
     minify?: boolean;
     trace?: boolean;
     external?: (string | RegExp)[];
@@ -38,10 +38,10 @@ const standaloner = (
       name: 'standaloner',
       apply: 'build',
       applyToEnvironment(environment) {
-        return environment.name !== 'client';
+        return environment.config.consumer !== 'client';
       },
-      configEnvironment(name) {
-        if (name === 'client') {
+      configEnvironment(_name, config) {
+        if (config.consumer === 'client') {
           return;
         }
         return {
@@ -57,7 +57,7 @@ const standaloner = (
       },
       async writeBundle(_, output) {
         const config = this.environment.config;
-        const outDir = toPosixPath(path.join(config.root, config.build.outDir));
+        const outDir = toPosixPath(path.isAbsolute(config.build.outDir) ? config.build.outDir : path.join(config.root, config.build.outDir));
         // Get all entry files from the output
         const entries = Object.entries(output)
           .filter(e => 'isEntry' in e[1] && e[1].isEntry)
@@ -93,11 +93,14 @@ const standaloner = (
           }
 
           const bundleOptions = typeof bundle_ === 'object' ? bundle_ : {};
+          // Input to object, so that entries are written at the same place
+          const input = Object.fromEntries(getInputOption().map(e => [removeExtension(pathRelativeTo(e, outDir)), e]));
           await bundle({
             ...bundleOptions,
-            input: getInputOption(),
+            input,
             external: options.external,
             output: {
+              ...bundleOptions.output,
               dir: outDir,
               minify,
               sourcemap: config.build.sourcemap,
@@ -113,3 +116,12 @@ const standaloner = (
     } satisfies Plugin,
   ];
 };
+
+export function pathRelativeTo(filePath: string, rel: string): string {
+  return normalizePath(path.relative(normalizePath(path.resolve(rel)), path.resolve(filePath)));
+}
+
+
+export function removeExtension(subject: string) {
+  return subject.replace(/\.[^/.]+$/, "");
+}
