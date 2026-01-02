@@ -1,4 +1,4 @@
-import path from 'path';
+import path from 'node:path';
 import { Colors } from './logging.js';
 
 // Store build statistics
