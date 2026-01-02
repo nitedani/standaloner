@@ -54,7 +54,7 @@ This runs TypeScript in watch mode (`tsc -w`).
 
 ### 3. Testing
 
-**There are no formal test scripts.** The `test/` directory contains example packages that demonstrate usage:
+**There are no automated unit/integration tests.** The `test/` directory contains example packages for manual testing that demonstrate usage:
 - `test/package1/` - Basic package with lodash dependency
 - `test/package2/` - Package with different lodash version (demonstrating multi-version handling)
 - `test/vite/` - Full Vite SSR application using standaloner plugin
@@ -67,7 +67,7 @@ node test.js  # Runs standaloner programmatically
 pnpm run build  # Builds via Vite plugin
 ```
 
-**IMPORTANT:** The `test/vite` package has a `prod` script, but it currently has a known issue where it expects `dist/server/index.js` but the bundle creates `dist/server/index.mjs`. The build itself succeeds, producing a 983KB bundled output.
+**IMPORTANT:** The `test/vite` package has a `prod` script, but it currently has a known issue where it expects `dist/server/index.js` but the bundle creates `dist/server/index.mjs`. **Workaround:** Use `node dist/server/index.mjs` directly instead of the `prod` script. The build itself succeeds, producing a 983KB bundled output, so this is only an issue with the final run step.
 
 ### 4. Validation
 
