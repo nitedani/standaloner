@@ -3,9 +3,9 @@ import type { RollupOutput } from 'rollup';
 import path from 'node:path';
 import fs from 'node:fs';
 
-export function cleanup(out: RolldownOutput | RollupOutput, outputDir: string) {
-  const outFilePaths = out.output.map(o => path.join(outputDir, o.fileName));
-  const bundledModuleIds = out.output.flatMap(o => ('moduleIds' in o ? o.moduleIds : []));
+export function cleanup(output: RolldownOutput['output'], outputDir: string) {
+  const outFilePaths = output.map(o => path.join(outputDir, o.fileName));
+  const bundledModuleIds = output.flatMap(o => ('moduleIds' in o ? o.moduleIds : []));
   const filesToDelete = bundledModuleIds.filter(
     id => id.startsWith(outputDir) && !outFilePaths.includes(id)
   );
