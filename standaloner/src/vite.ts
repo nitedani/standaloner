@@ -84,9 +84,6 @@ const standaloner = (
             const bundleEntryName = typeof bundle_ === 'object' && typeof bundle_.input === 'string' ? bundle_.input :  typeof bundle_ === 'string' ? bundle_ : 'index';
             const bundleEntry = entries.find(e => e.name === bundleEntryName);
             if (!bundleEntry) {
-              logWarning(
-                `Could not find '${bundleEntryName}' entry for bundling. Bundling all entries. To fix this, specify an existing entry name in the 'bundle' option.`
-              );
               return outPaths;
             }
             return [bundleEntry.outPath];
