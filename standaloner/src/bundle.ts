@@ -5,8 +5,6 @@ import {
   build,
   type BuildOptions,
   type RolldownOutput,
-  type OutputChunk,
-  type OutputAsset,
 } from 'rolldown';
 import { assetRelocatorPlugin } from './relocate.js';
 import { assert } from './utils/utils.js';
@@ -24,7 +22,9 @@ export type BundleResult = {
 /**
  * Options for the bundle function
  */
-export type BundleOptions = Omit<BuildOptions, 'external'> & {
+export type BundleOptions = Omit<BuildOptions, 'external' | 'input'> & {
+  input?: Record<string, string>;
+
   /**
    * Patterns to exclude from bundling
    */
@@ -71,8 +71,8 @@ export const bundle = async (options: BundleOptions): Promise<BundleResult> => {
 
   // If isolated mode is enabled and input is an object with multiple entries,
   // build each entry separately (concurrently, limited by CPU cores)
-  if (isolated && typeof rest.input === 'object' && !Array.isArray(rest.input)) {
-    const entries = Object.entries(rest.input);
+  if (isolated) {
+    const entries = Object.entries(rest.input!);
 
     if (entries.length > 1) {
       // Build entries concurrently with limited concurrency to avoid resource contention

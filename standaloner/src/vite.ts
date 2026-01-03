@@ -19,7 +19,6 @@ const standaloner = (
     trace?: boolean;
     external?: (string | RegExp)[];
     verbose?: boolean;
-    isolated?: boolean;
   } = {}
 ): Plugin[] => {
   if (options.verbose) {
@@ -104,7 +103,7 @@ const standaloner = (
             },
             root: config.root,
             cleanup: true,
-            isolated: options.isolated,
+            isolated: bundleOptions.isolated ?? false,
           });
         }
 
