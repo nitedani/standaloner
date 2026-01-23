@@ -3,7 +3,7 @@ import { normalizePath, type Plugin } from 'vite';
 import { assetRelocatorPlugin } from './relocate.js';
 import { trace } from './trace.js';
 import buildSummary from './utils/buildSummary.js';
-import { defaultExternalsPlugin } from './utils/default-externals.js';
+import { buildExternalsPlugin } from './utils/build-externals.js';
 import { searchForWorkspaceRoot } from './utils/searchRoot.js';
 import { assertUsage, toPosixPath } from './utils/utils.js';
 import { builtinModules } from 'node:module';
@@ -29,7 +29,7 @@ const standaloner = (
   const bundle_ = options.bundle ?? false;
 
   return [
-    defaultExternalsPlugin(options.external) as Plugin,
+    buildExternalsPlugin(options.external) as Plugin,
     assetRelocatorPlugin({
       outputDir: '.static',
     }),

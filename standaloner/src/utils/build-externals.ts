@@ -1,7 +1,7 @@
-import type { Plugin } from 'rolldown';
+import type { Plugin } from 'vite';
 
 export { isExternal };
-export { defaultExternalsPlugin };
+export { buildExternalsPlugin };
 export { externalPatterns };
 
 const externalPatterns = [
@@ -409,9 +409,9 @@ const isExternal = (packageId: string) => {
   return externalRegex.test(packageId);
 };
 
-const defaultExternalsPlugin = (external?: (string | RegExp)[]): Plugin => ({
+const buildExternalsPlugin = (external?: (string | RegExp)[]): Plugin => ({
+  apply: 'build',
   name: 'standaloner:default-externals',
-  //@ts-ignore
   enforce: 'pre',
   resolveId: {
     order: 'pre',

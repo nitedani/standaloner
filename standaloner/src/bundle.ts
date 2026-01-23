@@ -8,7 +8,7 @@ import {
 } from 'rolldown';
 import { assetRelocatorPlugin } from './relocate.js';
 import { assert } from './utils/utils.js';
-import { defaultExternalsPlugin } from './utils/default-externals.js';
+import { buildExternalsPlugin } from './utils/build-externals.js';
 import { cleanup as cleanup_ } from './utils/cleanup.js';
 
 /**
@@ -121,7 +121,7 @@ export const _bundle = (options: BundleOptions): Promise<RolldownOutput> => {
   const { cleanup, root, isolated, ...rest } = options;  // Set up plugins
   const plugins = [rest.plugins].flat().filter(Boolean);
   plugins.push(assetRelocatorPlugin({ outputDir: '.static' }));
-  plugins.push(defaultExternalsPlugin(options.external));
+  plugins.push(buildExternalsPlugin(options.external));
 
   return build({
     platform: 'node',
