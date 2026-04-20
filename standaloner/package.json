@@ -21,7 +21,7 @@
         "estree-walker": "^3.0.3",
         "magic-string": "^0.30.21",
         "p-limit": "^7.2.0",
-        "rolldown": "1.0.0-beta.51"
+        "rolldown": "^1.0.0-rc.16"
     },
     "devDependencies": {
         "@types/estree": "^1.0.8",
