@@ -30,7 +30,7 @@ importers:
         specifier: ^7.2.0
         version: 7.2.0
       rolldown:
-        specifier: ^1.0.0-rc.16
+        specifier: 1.0.0-rc.16
         version: 1.0.0-rc.16
     devDependencies:
       '@types/estree':
