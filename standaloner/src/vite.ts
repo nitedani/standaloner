@@ -80,12 +80,20 @@ const standaloner = (
 
         if (bundle_) {
           function getInputOption() {
-            const bundleEntryName = typeof bundle_ === 'object' && typeof bundle_.input === 'string' ? bundle_.input :  typeof bundle_ === 'string' ? bundle_ : 'index';
-            const bundleEntry = entries.find(e => e.name === bundleEntryName);
-            if (!bundleEntry) {
-              return outPaths;
+            if (typeof bundle_ === 'object' && bundle_.input) {
+              if (typeof bundle_.input === 'string') {
+                const bundleEntry = entries.find(e => e.name === bundle_.input);
+                return bundleEntry ? [bundleEntry.outPath] : outPaths;
+              } else if (Array.isArray(bundle_.input)) {
+                const matched = entries.filter(e => bundle_.input.includes(e.name));
+                return matched.length > 0 ? matched.map(e => e.outPath) : outPaths;
+              } else if (typeof bundle_.input === 'object') {
+                return Object.values(bundle_.input).map(p => path.isAbsolute(p) ? p : path.resolve(config.root, p));
+              }
             }
-            return [bundleEntry.outPath];
+            const bundleEntryName = typeof bundle_ === 'string' ? bundle_ : 'index';
+            const bundleEntry = entries.find(e => e.name === bundleEntryName);
+            return bundleEntry ? [bundleEntry.outPath] : outPaths;
           }
 
           const bundleOptions = typeof bundle_ === 'object' ? bundle_ : {};
