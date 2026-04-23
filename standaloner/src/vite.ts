@@ -14,7 +14,13 @@ export { standaloner as default, standaloner };
 
 const standaloner = (
   options: {
-    bundle?: boolean | string | string[] | Omit<BundleOptions, 'root' | 'external' | 'cleanup'>;
+    bundle?:
+      | boolean
+      | string
+      | string[]
+      | (Omit<BundleOptions, 'input' | 'root' | 'external' | 'cleanup'> & {
+          input?: string | string[] | Record<string, string>;
+        });
     minify?: boolean;
     trace?: boolean;
     external?: (string | RegExp)[];
@@ -80,15 +86,16 @@ const standaloner = (
 
         if (bundle_) {
           function getInputOption() {
-            if (typeof bundle_ === 'object' && bundle_.input) {
-              if (typeof bundle_.input === 'string') {
-                const bundleEntry = entries.find(e => e.name === bundle_.input);
+            if (typeof bundle_ === 'object' && !Array.isArray(bundle_) && bundle_.input) {
+              const inputOption = bundle_.input;
+              if (typeof inputOption === 'string') {
+                const bundleEntry = entries.find(e => e.name === inputOption);
                 return bundleEntry ? [bundleEntry.outPath] : outPaths;
-              } else if (Array.isArray(bundle_.input)) {
-                const matched = entries.filter(e => bundle_.input.includes(e.name));
+              } else if (Array.isArray(inputOption)) {
+                const matched = entries.filter(e => e.name && inputOption.includes(e.name));
                 return matched.length > 0 ? matched.map(e => e.outPath) : outPaths;
-              } else if (typeof bundle_.input === 'object') {
-                return Object.values(bundle_.input).map(p => path.isAbsolute(p) ? p : path.resolve(config.root, p));
+              } else if (typeof inputOption === 'object') {
+                return Object.values(inputOption as Record<string, string>).map(p => path.isAbsolute(p) ? p : path.resolve(config.root, p));
               }
             }
             const bundleEntryName = typeof bundle_ === 'string' ? bundle_ : 'index';
@@ -96,7 +103,7 @@ const standaloner = (
             return bundleEntry ? [bundleEntry.outPath] : outPaths;
           }
 
-          const bundleOptions = typeof bundle_ === 'object' ? bundle_ : {};
+          const bundleOptions = typeof bundle_ === 'object' && !Array.isArray(bundle_) ? bundle_ : {};
           // Respect the input name if object is provided.
           // Examples:
           // - { input: { file1: './path/file.mjs' } } → 'file1.mjs'
@@ -105,8 +112,8 @@ const standaloner = (
           // - { input: ['./path/file1.mjs', './path/file2.mjs'] } → 'file1.mjs' + 'file1.mjs'
           const input = Object.fromEntries(
             typeof bundleOptions.input === 'object' && bundleOptions.input !== null && !Array.isArray(bundleOptions.input)
-              ? Object.entries(bundleOptions.input).map(([k, v]) => [k, path.isAbsolute(v) ? v : path.resolve(config.root, v)])
-              : getInputOption().map(e => [removeExtension(pathRelativeTo(e, outDir)), e])
+              ? Object.entries(bundleOptions.input).map(([k, v]) => [k, path.isAbsolute(v as string) ? (v as string) : path.resolve(config.root, v as string)])
+              : getInputOption().map((e: string) => [removeExtension(pathRelativeTo(e, outDir)), e])
           );
           await bundle({
             ...bundleOptions,
