@@ -14,7 +14,7 @@ export { standaloner as default, standaloner };
 
 const standaloner = (
   options: {
-    bundle?: boolean | string | Omit<BundleOptions, 'root' | 'external' | 'cleanup'>;
+    bundle?: boolean | string | string[] | Omit<BundleOptions, 'root' | 'external' | 'cleanup'>;
     minify?: boolean;
     trace?: boolean;
     external?: (string | RegExp)[];
@@ -80,17 +80,21 @@ const standaloner = (
 
         if (bundle_) {
           function getInputOption() {
-            const bundleEntryName = typeof bundle_ === 'object' && typeof bundle_.input === 'string' ? bundle_.input :  typeof bundle_ === 'string' ? bundle_ : 'index';
-            const bundleEntry = entries.find(e => e.name === bundleEntryName);
-            if (!bundleEntry) {
-              return outPaths;
+            if (Array.isArray(bundle_)) {
+              const matched = entries.filter(e => e.name && bundle_.includes(e.name));
+              return matched.length > 0 ? matched.map(e => e.outPath) : outPaths;
             }
-            return [bundleEntry.outPath];
+            const bundleEntryName = typeof bundle_ === 'string' ? bundle_ : 'index';
+            const bundleEntry = entries.find(e => e.name === bundleEntryName);
+            return bundleEntry ? [bundleEntry.outPath] : outPaths;
           }
 
-          const bundleOptions = typeof bundle_ === 'object' ? bundle_ : {};
-          // Input to object, so that entries are written at the same place
-          const input = Object.fromEntries(getInputOption().map(e => [removeExtension(pathRelativeTo(e, outDir)), e]));
+          const bundleOptions = typeof bundle_ === 'object' && !Array.isArray(bundle_) ? bundle_ : {};
+          const input = bundleOptions.input
+            ? Object.fromEntries(
+                Object.entries(bundleOptions.input).map(([k, v]) => [k, path.resolve(config.root, v)])
+              )
+            : Object.fromEntries(getInputOption().map(e => [removeExtension(pathRelativeTo(e, outDir)), e]));
           await bundle({
             ...bundleOptions,
             input,

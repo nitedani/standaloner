@@ -83,7 +83,7 @@ const standaloner = async (options: StandalonerOptions) => {
   const shouldTrace = options.trace ?? true;
 
   const plugins = [bundleOptions.plugins].flat().filter(Boolean);
-  plugins.push(viteTransformPlugin());
+  plugins.push(viteTransformPlugin({ root }));
 
   const bundleOutput =
     options.bundle !== false

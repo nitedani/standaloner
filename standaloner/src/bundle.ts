@@ -129,16 +129,12 @@ export const _bundle = (options: BundleOptions): Promise<RolldownOutput> => {
     ...rest,
     plugins,
     output: {
-      inlineDynamicImports: true,
+      codeSplitting: false,
       banner: generateBanner(),
       entryFileNames: '[name].mjs',
       chunkFileNames: '[name]-[hash].mjs',
-      ...(rest.output || {}),
-    },
-
-    experimental: {
       strictExecutionOrder: true,
-      ...(rest.experimental || {}),
+      ...(rest.output || {}),
     },
   });
 }
