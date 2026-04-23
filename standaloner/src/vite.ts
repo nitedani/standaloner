@@ -14,7 +14,7 @@ export { standaloner as default, standaloner };
 
 const standaloner = (
   options: {
-    bundle?: boolean | string | Omit<BundleOptions, 'root' | 'external' | 'cleanup'>;
+    bundle?: boolean | string | string[] | Omit<BundleOptions, 'root' | 'external' | 'cleanup'>;
     minify?: boolean;
     trace?: boolean;
     external?: (string | RegExp)[];
