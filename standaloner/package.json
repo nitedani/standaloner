@@ -1,15 +1,13 @@
 {
     "name": "standaloner",
     "version": "0.2.2",
-    "description": "",
     "type": "module",
     "main": "dist/index.js",
     "exports": {
         ".": "./dist/index.js",
         "./vite": "./dist/vite.js"
     },
-    "keywords": [],
-    "author": "",
+    "repository": "github:nitedani/standaloner",
     "license": "MIT",
     "scripts": {
         "build": "rm -rf dist && tsc",
