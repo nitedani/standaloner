@@ -79,22 +79,22 @@ const standaloner = (
         }
 
         if (bundle_) {
-          function getInputOption() {
-            if (Array.isArray(bundle_)) {
-              const matched = entries.filter(e => e.name && bundle_.includes(e.name));
-              return matched.length > 0 ? matched.map(e => e.outPath) : outPaths;
-            }
-            const bundleEntryName = typeof bundle_ === 'string' ? bundle_ : 'index';
-            const bundleEntry = entries.find(e => e.name === bundleEntryName);
-            return bundleEntry ? [bundleEntry.outPath] : outPaths;
-          }
-
           const bundleOptions = typeof bundle_ === 'object' && !Array.isArray(bundle_) ? bundle_ : {};
-          const input = bundleOptions.input
-            ? Object.fromEntries(
-                Object.entries(bundleOptions.input).map(([k, v]) => [k, path.resolve(config.root, v)])
-              )
-            : Object.fromEntries(getInputOption().map(e => [removeExtension(pathRelativeTo(e, outDir)), e]));
+          assertUsage(!Array.isArray(bundleOptions.input), '`bundle.input` must be an object ({ name: path }), not an array');
+
+          let input: Record<string, string>;
+          if (bundleOptions.input) {
+            // User-provided input map: keep their keys, resolve values against root.
+            input = Object.fromEntries(
+              Object.entries(bundleOptions.input).map(([k, v]) => [k, path.resolve(config.root, v)])
+            );
+          } else {
+            // Re-bundle selected Vite entries in place: key by relpath so output lands at original location.
+            const names = typeof bundle_ === 'string' ? [bundle_] : Array.isArray(bundle_) ? bundle_ : ['index'];
+            const selected = entries.filter(e => e.name && names.includes(e.name));
+            const paths = selected.length > 0 ? selected.map(e => e.outPath) : outPaths;
+            input = Object.fromEntries(paths.map(p => [removeExtension(pathRelativeTo(p, outDir)), p]));
+          }
           await bundle({
             ...bundleOptions,
             input,
