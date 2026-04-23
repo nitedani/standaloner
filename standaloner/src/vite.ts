@@ -97,8 +97,17 @@ const standaloner = (
           }
 
           const bundleOptions = typeof bundle_ === 'object' ? bundle_ : {};
-          // Input to object, so that entries are written at the same place
-          const input = Object.fromEntries(getInputOption().map(e => [removeExtension(pathRelativeTo(e, outDir)), e]));
+          // Respect the input name if object is provided.
+          // Examples:
+          // - { input: { file1: './path/file.mjs' } } → 'file1.mjs'
+          // - { input: './path/file.mjs' } → 'index.mjs'
+          // - { input: { nameFile1: './path/file1.mjs', nameFile2: './path/file2.mjs' } } → 'nameFile1.mjs' + 'nameFile1.mjs'
+          // - { input: ['./path/file1.mjs', './path/file2.mjs'] } → 'file1.mjs' + 'file1.mjs'
+          const input = Object.fromEntries(
+            typeof bundleOptions.input === 'object' && bundleOptions.input !== null && !Array.isArray(bundleOptions.input)
+              ? Object.entries(bundleOptions.input).map(([k, v]) => [k, path.isAbsolute(v) ? v : path.resolve(config.root, v)])
+              : getInputOption().map(e => [removeExtension(pathRelativeTo(e, outDir)), e])
+          );
           await bundle({
             ...bundleOptions,
             input,
