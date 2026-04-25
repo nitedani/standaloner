@@ -1,8 +1,76 @@
+import fs from 'node:fs/promises';
 import type { Plugin } from 'vite';
 
 export { isExternal };
 export { buildExternalsPlugin };
 export { externalPatterns };
+export { clearImportOrigins, getOriginPaths, multiVersionConflicts };
+export type { VersionConflict };
+
+/**
+ * Captured during bundling: for each external specifier, a map of resolved on-disk
+ * locations to the set of importer file paths that reached each one.
+ *
+ * `specifier → resolvedPath → set of importer file paths`
+ *
+ * Multiple resolvedPath entries per specifier indicate distinct versions reached from
+ * different bundled importers (e.g. `foo` and `bar` each bundle their own `otel-binary`).
+ * The internal shape isn't exported — consumers use the helper functions below.
+ */
+const importOrigins = new Map<string, Map<string, Set<string>>>();
+
+function recordOrigin(id: string, resolved: string, importer: string): void {
+  let byResolved = importOrigins.get(id);
+  if (!byResolved) {
+    byResolved = new Map();
+    importOrigins.set(id, byResolved);
+  }
+  let importers = byResolved.get(resolved);
+  if (!importers) {
+    importers = new Set();
+    byResolved.set(resolved, importers);
+  }
+  importers.add(importer);
+}
+
+function clearImportOrigins(): void {
+  importOrigins.clear();
+}
+
+/**
+ * Returns every captured on-disk path for `id`. Used by the tracer: with one entry,
+ * it's the fallback for nft's failed resolution; with multiple, the tracer picks the
+ * highest semver so a single import at runtime lands on the newest version.
+ */
+function getOriginPaths(id: string): string[] {
+  const byResolved = importOrigins.get(id);
+  return byResolved ? [...byResolved.keys()] : [];
+}
+
+/** A single external specifier that resolved to more than one on-disk location. */
+type VersionConflict = {
+  id: string;
+  versions: Array<{ resolvedPath: string; importers: string[] }>;
+};
+
+/**
+ * Yields each specifier that resolved to more than one distinct version, along with
+ * the list of importer file paths that reached each version. Used by the multi-version
+ * warning to name the actual parent packages in its suggested fix.
+ */
+function* multiVersionConflicts(): Generator<VersionConflict> {
+  for (const [id, byResolved] of importOrigins) {
+    if (byResolved.size > 1) {
+      yield {
+        id,
+        versions: [...byResolved].map(([resolvedPath, importers]) => ({
+          resolvedPath,
+          importers: [...importers],
+        })),
+      };
+    }
+  }
+}
 
 const externalPatterns = [
   // Database drivers and ORM tools
@@ -44,9 +112,7 @@ const externalPatterns = [
 
   // Cryptography and hashing
   /^argon2$/, // Argon2 password hashing
-  /^argon2-browser$/, // Argon2 for browsers
   /^bcrypt$/, // BCrypt password hashing
-  /^bcryptjs$/, // Pure JS implementation but might still need special handling
   /^sodium-native$/, // Libsodium cryptography bindings
   /^sodium-universal$/, // Universal libsodium bindings
   /^keytar$/, // Native system keychain access
@@ -55,7 +121,6 @@ const externalPatterns = [
   /^pkcs11js$/, // PKCS#11 bindings
   /^ssh2$/, // SSH client and server implementations
   /^gpg$/, // GnuPG encryption
-  /^tls$/, // TLS implementation
   /^@peculiar\//, // WebCrypto packages
   /^webcrypto$/, // Web Cryptography API
   /^@trust\//, // Trust Services
@@ -113,9 +178,6 @@ const externalPatterns = [
   /^node-vad$/, // Voice activity detection
 
   // File system and OS interaction
-  /^chokidar$/, // File watcher
-  /^fs-extra$/, // Enhanced file system methods
-  /^graceful-fs$/, // Graceful file system operations
   /^node-watch$/, // File watcher
   /^drivelist$/, // List all connected drives
   /^diskusage$/, // Disk usage information
@@ -218,7 +280,6 @@ const externalPatterns = [
   /^child-process-ext$/, // Extended child process utilities
   /^sudo-prompt$/, // Execute commands with sudo
   /^node-powershell$/, // PowerShell execution
-  /^execa$/, // Process execution improvements
   /^windows-process-tree$/, // Windows process tree information
   /^node-pty$/, // Pseudo terminal bindings
 
@@ -236,7 +297,6 @@ const externalPatterns = [
   /^regedit$/, // Windows registry editor
 
   // Network tools
-  /^network$/, // Network utilities
   /^ping$/, // ICMP ping implementation
   /^traceroute$/, // Traceroute implementation
   /^netstat$/, // Network statistics
@@ -386,8 +446,35 @@ const externalPatterns = [
   /.*-linux\.node$/,
   /.*-prebuilds\/.*$/, // Prebuilt binaries directory
 
-  // Known broken CSJ packages
-  /^prettier$/, // Code formatter
+  // Bundlers and build tooling (native bindings via platform-specific optional deps)
+  /^@swc\/core$/, // SWC compiler
+  /^@swc\//, // SWC scope (plugins, helpers)
+  /^esbuild$/, // esbuild bundler
+  /^rollup$/, // Rollup bundler
+  /^vite$/, // Vite
+  /^rolldown$/, // Rolldown bundler
+  /^@rspack\/core$/, // Rspack core
+  /^lightningcss$/, // CSS parser/transformer/minifier
+  /^sass-embedded$/, // Dart Sass embedded host
+  /^turbo$/, // Turborepo
+  /^@tailwindcss\/oxide$/, // Tailwind v4 Rust engine
+  /^@biomejs\/biome$/, // Biome linter/formatter
+  /^@parcel\//, // Parcel packages (watcher, lightningcss, etc.)
+  /^@napi-rs\//, // N-API Rust scope
+
+  // Databases (native)
+  /^duckdb$/, // DuckDB
+  /^libsql$/, // libSQL client
+  /^rocksdb$/, // RocksDB bindings
+  /^lmdb$/, // LMDB bindings
+  /^classic-level$/, // LevelDB-family bindings
+
+  // ML runtime (native)
+  /^@tensorflow\/tfjs-node$/, // TensorFlow.js Node bindings
+  /^onnxruntime-node$/, // ONNX Runtime Node bindings
+
+  // Native build/install toolchain
+  /^prebuild-install$/, // Downloads prebuilt binaries
 ];
 
 // Convert the array of regex patterns into a single combined regex
@@ -413,6 +500,9 @@ const buildExternalsPlugin = (external?: (string | RegExp)[]): Plugin => ({
   apply: 'build',
   name: 'standaloner:default-externals',
   enforce: 'pre',
+  buildStart() {
+    clearImportOrigins();
+  },
   resolveId: {
     order: 'pre',
     async handler(id, importer, options) {
@@ -421,15 +511,28 @@ const buildExternalsPlugin = (external?: (string | RegExp)[]): Plugin => ({
         (external &&
           external.some(pattern => (pattern instanceof RegExp ? pattern.test(id) : pattern === id)))
       ) {
-        // Make sure it's really a .node file
-        if (id.endsWith('.node')) {
-          const resolved = await this.resolve(id, importer, options);
-          if (resolved) {
-            const isNodeFile = resolved.id.endsWith('.node');
-            if (!isNodeFile) {
-              return null;
-            }
-          }
+        const resolved = await this.resolve(id, importer, { ...options, skipSelf: true });
+
+        // Sanity check: a `.node`-suffixed specifier should resolve to an actual `.node` file.
+        // If not, it's not really a native binding — let other plugins handle the import.
+        if (id.endsWith('.node') && resolved && !resolved.id.endsWith('.node')) {
+          return null;
+        }
+
+        // Capture the on-disk location and which importer reached it so the tracer can
+        // resolve phantom imports (pnpm nested deps invisible from the bundled entry's
+        // directory) and the multi-version warning can name the parent packages.
+        //
+        // Some plugins decorate real paths with a `\0` prefix and/or `?query` suffix
+        // (rolldown's CJS interop plugin does exactly this: `\0/abs/path.js?commonjs-es-import`).
+        // We strip those and try `fs.realpath`; if the stripped path still isn't a real
+        // file, it was a genuine virtual id and we skip capture rather than store garbage.
+        if (importer && resolved && !resolved.external) {
+          let cleanId = resolved.id;
+          if (cleanId.startsWith('\0')) cleanId = cleanId.slice(1);
+          cleanId = cleanId.replace(/[?#].*$/, '');
+          const real = await fs.realpath(cleanId).catch(() => null);
+          if (real) recordOrigin(id, real, importer);
         }
 
         return { id, external: true };

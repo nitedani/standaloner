@@ -50,10 +50,23 @@ function logError(message: string): void {
 }
 
 /**
- * Log a warning message (yellow color)
+ * Log a warning message (yellow color).
+ *
+ * Short single-line warnings render inline with `[build:warning] <msg>`. Multi-line
+ * messages render as a block with a horizontal rule above and below, visually separating
+ * them from surrounding build output so the reader can't miss them. The first line sits
+ * next to the `[build:warning]` prefix; subsequent lines appear verbatim (indent them
+ * in the caller if you want indentation).
  */
 function logWarning(message: string): void {
-  console.warn(formatMessage(Colors.yellow, '[build:warning]', message));
+  const lines = message.split('\n');
+  if (lines.length === 1) {
+    console.warn(formatMessage(Colors.yellow, '[build:warning]', message));
+    return;
+  }
+  const rule = `${Colors.yellow}${'━'.repeat(72)}${Colors.reset}`;
+  const prefix = `${Colors.yellow}${Colors.bright}[build:warning]${Colors.reset}`;
+  console.warn(`\n${rule}\n${prefix} ${lines[0]}\n${lines.slice(1).join('\n')}\n${rule}\n`);
 }
 
 /**

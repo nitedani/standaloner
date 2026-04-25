@@ -10,6 +10,7 @@ export default {
     standaloner({
       bundle: true,
       minify: true,
+      // external: ["lodash"]
     }),
   ],
   build: {

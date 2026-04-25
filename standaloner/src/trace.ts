@@ -2,11 +2,16 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { platform } from 'node:os';
-import { nodeFileTrace, type NodeFileTraceResult } from '@vercel/nft';
+import { nodeFileTrace, resolve as nftDefaultResolve, type NodeFileTraceResult } from '@vercel/nft';
 import { assert, toPosixPath } from './utils/utils.js';
 import { searchForPackageRoot } from './utils/searchRoot.js';
-import { logInfo, logVerbose, logWarning } from './utils/logging.js';
+import { Colors, logInfo, logVerbose, logWarning } from './utils/logging.js';
 import buildSummary from './utils/buildSummary.js';
+import {
+  getOriginPaths,
+  multiVersionConflicts,
+  type VersionConflict,
+} from './utils/build-externals.js';
 
 export { trace };
 
@@ -48,9 +53,14 @@ interface TracedFile {
   pkgVersion: string;
   /** Path to package root (relative to baseDir) */
   pkgPath: string;
+  /** Absolute realpath of the package root (same location as `pkgPath`, canonical form) */
+  pkgPathReal: string;
   /** Package.json contents */
   packageJson: PackageJson;
 }
+
+/** Package-scoped metadata: everything on `TracedFile` except file-specific fields. */
+type PkgInfo = Omit<TracedFile, 'path' | 'parents'>;
 
 /**
  * Traces dependencies for input files and organizes them into an output directory,
@@ -103,6 +113,15 @@ async function trace({
     return;
   }
 
+  // Pick up platform-specific optionalDependencies that nft can't resolve statically
+  // (rollup, esbuild, sharp, @parcel/watcher, @node-rs/* etc. load their native binding
+  // via a dynamic require keyed on process.platform/arch).
+  await traceOptionalDeps(tracedFiles, baseDir);
+
+  // Pick up prebuilt native binaries that nft's static analysis misses
+  // (node-gyp-build, prebuild-install, napi-rs — dynamic require by platform/arch).
+  await addNativeBinaries(tracedFiles);
+
   // Copy/link dependencies based on trace results
   await processTracedFiles(tracedFiles, { nodeModulesPath, versionsPath });
 
@@ -116,9 +135,9 @@ async function trace({
     packageRegistry[file.pkgName]![file.pkgVersion]!.push(file.path);
   }
 
-  const multiVersionCount = Object.values(packageRegistry)
-    .filter(versions => Object.keys(versions).length > 1)
-    .length;
+  const multiVersionCount = Object.values(packageRegistry).filter(
+    versions => Object.keys(versions).length > 1
+  ).length;
 
   buildSummary.recordDependencies(
     Object.keys(packageRegistry).length,
@@ -137,7 +156,30 @@ async function traceProjectFiles(
   baseDir: string,
   outDir: string
 ): Promise<Record<string, TracedFile>> {
-  const traceResults = await nodeFileTrace(entryFiles, { base: baseDir });
+  // Warn loudly when the same external specifier resolves to different versions from
+  // different importers. The bundler collapses externals to a single import in the output,
+  // so only one version will ship at runtime regardless of what we do here.
+  for (const conflict of multiVersionConflicts()) {
+    await emitMultiVersionWarning(conflict, baseDir);
+  }
+
+  const traceResults = await nodeFileTrace(entryFiles, {
+    base: baseDir,
+    // Default-first: let nft's own resolution run as today. Only on miss, try our captured
+    // phantom-dep map.
+    // When multiple versions are captured, pick the highest semver: the bundler has
+    // already collapsed the external to a single runtime import, and shipping the newer
+    // copy is generally safer (APIs are typically backwards-compatible).
+    resolve: async (id, parent, job, cjsResolve) => {
+      try {
+        return await nftDefaultResolve(id, parent, job, cjsResolve);
+      } catch (err) {
+        const fallback = await pickLatestOrigin(id);
+        if (fallback) return fallback;
+        throw err;
+      }
+    },
+  });
   const relOutDir = path.relative(baseDir, outDir);
 
   // Filter out NFT internals, entry points, system files, and files already in output
@@ -201,16 +243,11 @@ async function processSingleFile(
 
     const baseInfo: Pick<TracedFile, 'path' | 'parents'> = { path: realPath, parents: parentPaths };
 
-    // Attempt to resolve package info (returns null if not in node_modules or a recognized workspace)
-    let pkgInfo: Omit<TracedFile, 'path' | 'parents'> | null;
-    if (posixPath.includes('node_modules/')) {
-      pkgInfo = await resolveNodeModulesPackage(posixPath, baseDir);
-    } else {
-      pkgInfo = await resolveWorkspacePackage(realPath, baseDir);
-    }
-
-    // Only return a TracedFile object if package info was successfully resolved
-    return pkgInfo ? { ...baseInfo, ...pkgInfo } : null;
+    const pkgInfo = posixPath.includes('node_modules/')
+      ? await resolveNodeModulesPackage(posixPath, baseDir)
+      : await resolveWorkspacePackage(realPath, baseDir);
+    if (!pkgInfo) return null;
+    return { ...baseInfo, ...pkgInfo };
   } catch (error: any) {
     // Log errors encountered during processing of a single file but continue tracing others
     logWarning(`Skipping file ${posixPath} due to error: ${error.message}`);
@@ -222,78 +259,54 @@ async function processSingleFile(
  * Resolves package info for a file assumed to be within a workspace package by searching upwards for package.json.
  */
 async function resolveWorkspacePackage(
-  absoluteFilePath: string, // Use absolute path for reliable searching
+  absoluteFilePath: string,
   baseDir: string
-): Promise<Omit<TracedFile, 'path' | 'parents'> | null> {
-  try {
-    // Find the nearest package.json directory above the file
-    const pkgRoot = searchForPackageRoot(path.dirname(absoluteFilePath));
-    if (!pkgRoot) return null; // searchForPackageRoot should handle not found cases
+): Promise<PkgInfo | null> {
+  const found = await readContainingPkgJson(absoluteFilePath);
+  if (!found) return null;
+  const { root: pkgRoot, pkgJson } = found;
 
-    const pkgJsonPath = path.join(pkgRoot, 'package.json');
-    const pkgJsonContent = await fs.readFile(pkgJsonPath, 'utf-8');
-    const pkgJson: PackageJson = JSON.parse(pkgJsonContent);
-
-    // A package must have a name to be considered valid in this context
-    if (!pkgJson?.name) {
-      logWarning(`Workspace package at ${pkgRoot} skipped: missing name.`);
-      return null;
-    }
-
-    return {
-      pkgName: pkgJson.name,
-      pkgVersion: pkgJson.version || DEFAULT_VERSION,
-      pkgPath: path.relative(baseDir, pkgRoot), // Path relative to the tracing base directory
-      subpath: path.relative(pkgRoot, absoluteFilePath), // Path relative to its own package root
-      packageJson: pkgJson,
-    };
-  } catch (error: any) {
-    // Fail gracefully if package.json is missing or unparsable
-    logWarning(`Could not resolve workspace package for ${absoluteFilePath}: ${error.message}`);
+  if (!pkgJson.name) {
+    logWarning(`Workspace package at ${pkgRoot} skipped: missing name.`);
     return null;
   }
+
+  const pkgName = pkgJson.name;
+  const pkgVersion = pkgJson.version || DEFAULT_VERSION;
+  const pkgPath = path.relative(baseDir, pkgRoot); // relative to the tracing base directory
+  const pkgPathReal = pkgRoot; // already canonical (walked from a realpath)
+  const subpath = path.relative(pkgRoot, absoluteFilePath);
+  const packageJson = pkgJson;
+
+  return { pkgName, pkgVersion, pkgPath, pkgPathReal, subpath, packageJson };
 }
 
 /**
  * Resolves package info for a file path assumed to be within node_modules using regex.
+ * The regex gives us the package root directly, so no upward walk is needed.
  */
 async function resolveNodeModulesPackage(
   relativePath: string, // Path relative to baseDir
   baseDir: string
-): Promise<Omit<TracedFile, 'path' | 'parents'> | null> {
+): Promise<PkgInfo | null> {
   const match = NODE_MODULES_RE.exec(relativePath);
-  if (!match) {
-    // This shouldn't happen if called correctly, but handle defensively
-    return null;
-  }
+  if (!match) return null;
   const [, nodeModulesBase, pkgName, rawSubpath = ''] = match;
 
   assert(pkgName, `Failed to parse package name from ${relativePath}`);
   assert(nodeModulesBase, `Failed to parse node_modules base from ${relativePath}`);
 
-  const pkgPath = path.join(nodeModulesBase, pkgName); // Package path relative to baseDir
-  const pkgJsonPath = path.join(baseDir, pkgPath, 'package.json'); // Absolute path to package.json
+  const pkgPath = path.join(nodeModulesBase, pkgName);
+  const pkgRootAbs = path.join(baseDir, pkgPath);
+  const pkgPathReal = await fs.realpath(pkgRootAbs).catch(() => pkgRootAbs);
+  const pkgJson = await readPkgJson(pkgRootAbs);
+  const subpath = rawSubpath.startsWith('/') ? rawSubpath.slice(1) : rawSubpath;
+  const pkgVersion = pkgJson?.version || DEFAULT_VERSION;
+  // Missing or unreadable package.json is tolerated — we still know the package name
+  // from the regex — but downstream copy logic gets a minimal stub.
+  const packageJson = pkgJson || { name: pkgName, version: DEFAULT_VERSION };
 
-  // Attempt to read and parse package.json, default to null if fails
-  let pkgJson: PackageJson | null = null;
-  try {
-    const pkgJsonContent = await fs.readFile(pkgJsonPath, 'utf-8');
-    pkgJson = JSON.parse(pkgJsonContent);
-  } catch {
-    // Ignore error (e.g., package.json not found), pkgJson remains null
-  }
-
-  // Ensure subpath doesn't start with a '/' after regex capture
-  const subpath = rawSubpath.startsWith('/') ? rawSubpath.substring(1) : rawSubpath;
-
-  return {
-    pkgName,
-    pkgVersion: pkgJson?.version || DEFAULT_VERSION,
-    pkgPath,
-    subpath,
-    // Use the successfully read package.json, or provide a minimal default stub
-    packageJson: pkgJson || { name: pkgName, version: DEFAULT_VERSION },
-  };
+  return { pkgName, pkgVersion, pkgPath, pkgPathReal, subpath, packageJson };
 }
 
 /**
@@ -569,6 +582,243 @@ function applyProductionCondition(exports: any): void {
     // Avoid infinite loops for circular references (though unlikely in valid package.json)
     if (typeof exports[key] === 'object' && exports[key] !== null) {
       applyProductionCondition(exports[key]);
+    }
+  }
+}
+
+async function traceOptionalDeps(
+  tracedFiles: Record<string, TracedFile>,
+  baseDir: string
+): Promise<void> {
+  // Names already covered by the main nft trace — skip those entirely so we don't
+  // re-walk their directories. The per-file `tracedFiles[real]` dedup downstream would
+  // also prevent duplication, but skipping here saves the readdir + stat calls.
+  const alreadyTraced = new Set<string>();
+  for (const file of Object.values(tracedFiles)) alreadyTraced.add(file.pkgName);
+
+  for (const pkg of uniquePackages(tracedFiles)) {
+    const optDeps = pkg.packageJson?.optionalDependencies;
+    if (!optDeps || typeof optDeps !== 'object') continue;
+
+    for (const depName of Object.keys(optDeps)) {
+      if (alreadyTraced.has(depName)) continue;
+      const depRoot = await findOptionalDepRoot(depName, pkg.path);
+      if (!depRoot) continue;
+
+      const depPkgJson = await readPkgJson(depRoot);
+      if (!depPkgJson?.name) continue;
+
+      // Per-package metadata reused for every file we add below.
+      const pkgName = depPkgJson.name;
+      const pkgVersion = depPkgJson.version || DEFAULT_VERSION;
+      const pkgPath = path.relative(baseDir, depRoot);
+      const pkgPathReal = depRoot;
+      const packageJson = depPkgJson;
+      const parents = [pkg.path];
+
+      const entries = await fs.readdir(depRoot, { recursive: true, withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(entry.parentPath, entry.name);
+        // Accept regular files and symlinks-to-files. A symlink-to-directory would slip
+        // through a naive `isFile() || isSymbolicLink()` check and later trip `fs.copyFile`
+        // with EISDIR, so we stat the target to confirm.
+        if (!entry.isFile()) {
+          if (!entry.isSymbolicLink()) continue;
+          const targetStat = await fs.stat(fullPath).catch(() => null);
+          if (!targetStat?.isFile()) continue;
+        }
+        const subpath = path.relative(depRoot, fullPath);
+        if (subpath.split(/[\\/]/).includes('node_modules')) continue;
+        const real = await fs.realpath(fullPath).catch(() => fullPath);
+        if (tracedFiles[real]) continue;
+        tracedFiles[real] = {
+          path: real,
+          subpath,
+          parents,
+          pkgName,
+          pkgVersion,
+          pkgPath,
+          pkgPathReal,
+          packageJson,
+        };
+      }
+    }
+  }
+}
+
+async function findOptionalDepRoot(
+  depName: string,
+  parentFile: string
+): Promise<string | null> {
+  let current = path.dirname(parentFile);
+  while (true) {
+    const candidate = path.join(current, 'node_modules', depName);
+    try {
+      await fs.access(path.join(candidate, 'package.json'));
+      return candidate;
+    } catch {}
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+async function readPkgJson(dir: string): Promise<PackageJson | null> {
+  try {
+    return JSON.parse(await fs.readFile(path.join(dir, 'package.json'), 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+async function readContainingPkgJson(
+  file: string
+): Promise<{ root: string; pkgJson: PackageJson } | null> {
+  const root = searchForPackageRoot(path.dirname(file));
+  if (!root) return null;
+  const pkgJson = await readPkgJson(root);
+  if (!pkgJson) {
+    logWarning(`Could not read package.json at ${root}`);
+    return null;
+  }
+  return { root, pkgJson };
+}
+
+/** Returns one sample `TracedFile` per unique `pkgName@pkgVersion` in the trace map. */
+function uniquePackages(tracedFiles: Record<string, TracedFile>): TracedFile[] {
+  const seen = new Set<string>();
+  const samples: TracedFile[] = [];
+  for (const file of Object.values(tracedFiles)) {
+    const key = `${file.pkgName}@${file.pkgVersion}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    samples.push(file);
+  }
+  return samples;
+}
+
+/**
+ * When a specifier was captured from multiple importers that resolved to different
+ * versions, returns the highest-semver resolved path. Used by the nft fallback hook
+ * so a single runtime `import` lands on the newest copy.
+ */
+async function pickLatestOrigin(id: string): Promise<string | undefined> {
+  const paths = getOriginPaths(id);
+  if (paths.length === 0) return undefined;
+  if (paths.length === 1) return paths[0];
+
+  let best: { path: string; version: string } | undefined;
+  for (const resolved of paths) {
+    const found = await readContainingPkgJson(resolved);
+    const version = found?.pkgJson.version || DEFAULT_VERSION;
+    // compareVersions returns (v2 - v1) per-component — positive when v2 > v1.
+    if (!best || compareVersions(best.version, version) > 0) {
+      best = { path: resolved, version };
+    }
+  }
+  return best?.path;
+}
+
+/**
+ * Looks up the package name containing the given importer file. Returns `null` for
+ * files outside any named package.
+ */
+async function getImporterPkgName(importer: string): Promise<string | null> {
+  const found = await readContainingPkgJson(importer);
+  return found?.pkgJson.name || null;
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Builds and logs the multi-version warning for a single specifier, naming the actual
+ * parent packages so the user can copy-paste the suggested `external` list.
+ */
+async function emitMultiVersionWarning(
+  { id, versions }: VersionConflict,
+  baseDir: string
+): Promise<void> {
+  const versionLines: string[] = [];
+  const allParents = new Set<string>();
+
+  for (const { resolvedPath, importers } of versions) {
+    const parents = new Set<string>();
+    for (const importer of importers) {
+      const name = await getImporterPkgName(importer);
+      if (name) {
+        parents.add(name);
+        allParents.add(name);
+      }
+    }
+    const parentLabel = parents.size > 0 ? [...parents].join(', ') : '<unknown parent>';
+    versionLines.push(
+      `  ${Colors.yellow}•${Colors.reset} ${path.relative(baseDir, resolvedPath)}\n` +
+        `      ${Colors.cyan}imported by:${Colors.reset} ${parentLabel}`
+    );
+  }
+
+  const externalSuggestion =
+    allParents.size > 0
+      ? `[${[...allParents].map(n => `/^${escapeRegex(n)}$/`).join(', ')}]`
+      : `[/^<parent-pkg>$/]`;
+
+  // Multi-line message — logWarning will wrap this in a block with top/bottom rules.
+  // First line sits next to the `[build:warning]` prefix.
+  logWarning(
+    `${Colors.bright}Multi-version external "${id}"${Colors.reset} resolves to ${Colors.bright}${versions.length}${Colors.reset} different on-disk locations:\n` +
+      '\n' +
+      versionLines.join('\n') +
+      '\n' +
+      '\n' +
+      `  The bundled output contains a single \`${Colors.bright}import "${id}"${Colors.reset}\`; at runtime only one copy will be loaded.\n` +
+      '\n' +
+      `  ${Colors.bright}Fix:${Colors.reset} externalize the parent packages so they stay in node_modules.\n` +
+      `  The tracer handles nested versions correctly when parents are not bundled:\n` +
+      '\n' +
+      `    ${Colors.green}${Colors.bright}standaloner({ external: ${externalSuggestion} })${Colors.reset}`
+  );
+}
+
+/**
+ * Globs each unique traced package for `**\/*.node` and adds any prebuilt binaries
+ * that nft's static analysis missed (common for node-gyp-build / prebuild-install / napi-rs).
+ */
+async function addNativeBinaries(tracedFiles: Record<string, TracedFile>): Promise<void> {
+  for (const sample of uniquePackages(tracedFiles)) {
+    try {
+      // `exclude: node_modules` prevents descending into nested deps under flat layouts —
+      // their .node files belong to the inner package, not to this outer one, and the
+      // inner package will be globbed on its own iteration.
+      for await (const rel of fs.glob('**/*.node', {
+        cwd: sample.pkgPathReal,
+        exclude: name => name === 'node_modules',
+      })) {
+        const abs = path.join(sample.pkgPathReal, rel);
+        // Defensive `isFile`: glob can match dangling symlinks or directories whose
+        // names happen to end in `.node`. Skip anything that doesn't actually resolve
+        // to a regular file before adding it to the trace.
+        const targetStat = await fs.stat(abs).catch(() => null);
+        if (!targetStat?.isFile()) continue;
+        const real = await fs.realpath(abs).catch(() => abs);
+        if (tracedFiles[real]) continue;
+        const subpath = path.relative(sample.pkgPathReal, abs);
+        const { pkgName, pkgVersion, pkgPath, pkgPathReal, packageJson } = sample;
+        const parents: string[] = [];
+        tracedFiles[real] = {
+          path: real,
+          subpath,
+          parents,
+          pkgName,
+          pkgVersion,
+          pkgPath,
+          pkgPathReal,
+          packageJson,
+        };
+      }
+    } catch {
+      // Glob failure for this package (permissions, missing dir) — skip silently.
     }
   }
 }
