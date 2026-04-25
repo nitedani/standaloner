@@ -5,7 +5,7 @@
     "build": "rimraf dist && vike build",
     "prisma:reset": "rimraf ./prisma/dev.db && pnpm prisma generate && pnpm prisma db push",
     "prepare": "pnpm run prisma:reset",
-    "prod": "pnpm run prisma:reset && pnpm run build && cp ./prisma/test.db ./dist/server/node_modules/.prisma/client/test.db && cross-env NODE_ENV=production node ./dist/server/index.js"
+    "prod": "pnpm run prisma:reset && pnpm run build && cp ./prisma/test.db ./dist/server/node_modules/.prisma/client/test.db && cross-env NODE_ENV=production node ./dist/server/index.mjs"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",
