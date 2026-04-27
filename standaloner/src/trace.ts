@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { platform } from 'node:os';
@@ -90,13 +91,6 @@ async function trace({
   assert(input.length > 0, 'Input must be non-empty');
   logVerbose('Tracing package dependencies...');
 
-  // Check for unsupported PnP
-  try {
-    require('pnpapi');
-    logInfo('Warning: Yarn PnP detected, which is not supported. Skipping trace.');
-    return;
-  } catch {} // PnP not in use, proceed
-
   // Prepare output directories
   const nodeModulesPath = path.join(outDir, nodeModulesDir);
   const versionsPath = path.join(nodeModulesPath, versionsDir);
@@ -174,6 +168,12 @@ async function traceProjectFiles(
       try {
         return await nftDefaultResolve(id, parent, job, cjsResolve);
       } catch (err) {
+        try {
+          const parentFile = parent ? path.resolve(baseDir, parent) : path.join(baseDir, 'index.js');
+          const req = createRequire(parentFile);
+          return toPosixPath(req.resolve(id));
+        } catch {}
+
         const fallback = await pickLatestOrigin(id);
         if (fallback) return fallback;
         throw err;
