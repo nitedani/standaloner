@@ -172,11 +172,11 @@ async function traceProjectFiles(
           const parentFile = parent ? path.resolve(baseDir, parent) : path.join(baseDir, 'index.js');
           const req = createRequire(parentFile);
           return toPosixPath(req.resolve(id));
-        } catch {}
-
-        const fallback = await pickLatestOrigin(id);
-        if (fallback) return fallback;
-        throw err;
+        } catch {
+          const fallback = await pickLatestOrigin(id);
+          if (fallback) return fallback;
+          throw err;
+        }
       }
     },
   });
