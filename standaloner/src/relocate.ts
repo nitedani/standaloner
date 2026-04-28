@@ -603,7 +603,7 @@ function processRequireCall(node: CallExpression, dirName: string, sourceId: str
   return [
     {
       node: arg,
-      path: modulePath,
+      path: potentialPath,
       transformInfo: {
         type: 'require',
         start: node.start,
