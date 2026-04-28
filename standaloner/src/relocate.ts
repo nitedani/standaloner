@@ -20,10 +20,19 @@ const require = createRequire(import.meta.url);
 
 const safeRequireResolve = (
   request: string,
-  options?: { paths?: string[] | undefined }
+  importer?: string
 ): string | undefined => {
   try {
-    return toPosixPath(require.resolve(request, options));
+    let req = require;
+    if (importer) {
+      let cleanedImporter = importer;
+      if (cleanedImporter.startsWith('\0')) cleanedImporter = cleanedImporter.slice(1);
+      cleanedImporter = cleanedImporter.replace(/[?#].*$/, '');
+      if (path.isAbsolute(cleanedImporter)) {
+        req = createRequire(cleanedImporter);
+      }
+    }
+    return toPosixPath(req.resolve(request));
   } catch {
     return undefined;
   }
@@ -111,7 +120,7 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
     },
 
     async resolveId(source, importer, options) {
-      return (await this.resolve(source, importer, options)) || safeRequireResolve(source);
+      return (await this.resolve(source, importer, options)) || safeRequireResolve(source, importer);
     },
 
     async load(id: string) {
@@ -384,7 +393,7 @@ function findFileReferences(ast: Program, dirName: string, sourceId: string): Fi
       } else if (isPathJoinOperation(node)) {
         ref = processPathJoinOperation(node as CallExpression, dirName);
       } else if (isRequireCall(node)) {
-        ref = processRequireCall(node as CallExpression, dirName);
+        ref = processRequireCall(node as CallExpression, dirName, sourceId);
       } else if (isFsOperation(node)) {
         ref = processFsOperation(node as CallExpression, dirName);
       }
@@ -566,7 +575,7 @@ function isRequireCall(node: Node): node is CallExpression {
 }
 
 /** Process require() call */
-function processRequireCall(node: CallExpression, dirName: string): FileReference[] | null {
+function processRequireCall(node: CallExpression, dirName: string, sourceId: string): FileReference[] | null {
   const arg = node.arguments[0];
   if (!arg) return null;
 
@@ -578,7 +587,7 @@ function processRequireCall(node: CallExpression, dirName: string): FileReferenc
   }
   if (!modulePath) return null;
 
-  const resolved = safeRequireResolve(modulePath);
+  const resolved = safeRequireResolve(modulePath, sourceId);
   const potentialPath = resolved || path.resolve(dirName, modulePath);
   const ext = path.extname(potentialPath).toLowerCase();
   if (['.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.json', ''].includes(ext)) return null;
@@ -594,7 +603,7 @@ function processRequireCall(node: CallExpression, dirName: string): FileReferenc
   return [
     {
       node: arg,
-      path: modulePath,
+      path: potentialPath,
       transformInfo: {
         type: 'require',
         start: node.start,
