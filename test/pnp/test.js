@@ -17,15 +17,16 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'standaloner-pnp-test-'));
 console.log(`Created temporary Yarn PnP directory: ${tmpDir}`);
 
 try {
-  // 1. Initialize Yarn PnP project
+  // 1. Initialize Yarn PnP project non-interactively
   console.log('Initializing Yarn PnP project...');
-  execSync('corepack yarn init -2', { stdio: 'inherit', cwd: tmpDir });
-
-  // Add type: module to package.json to test ESM
   const pkgJsonPath = path.join(tmpDir, 'package.json');
-  const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'));
-  pkgJson.type = 'module';
-  fs.writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, 2));
+  fs.writeFileSync(pkgJsonPath, JSON.stringify({
+    name: 'standaloner-pnp-test',
+    private: true,
+    type: 'module'
+  }, null, 2));
+  execSync('corepack yarn set version berry', { stdio: 'inherit', cwd: tmpDir });
+  execSync('corepack yarn install', { stdio: 'inherit', cwd: tmpDir });
 
   // 2. Install a dependency (lodash) and 3. install the local standaloner package
   console.log('Installing dependencies (lodash, local standaloner)...');
