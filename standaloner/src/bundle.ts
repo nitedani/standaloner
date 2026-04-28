@@ -123,13 +123,15 @@ export const _bundle = (options: BundleOptions): Promise<RolldownOutput> => {
   plugins.push(assetRelocatorPlugin({ outputDir: '.static' }));
   plugins.push(buildExternalsPlugin(options.external));
 
+  const numInputs = Object.keys(options.input).length;
+  
   return build({
     platform: 'node',
     write: true,
     ...rest,
     plugins,
     output: {
-      codeSplitting: false,
+      codeSplitting: numInputs > 1,
       banner: generateBanner(),
       entryFileNames: '[name].mjs',
       chunkFileNames: '[name]-[hash].mjs',
