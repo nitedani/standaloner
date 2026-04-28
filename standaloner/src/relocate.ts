@@ -23,7 +23,15 @@ const safeRequireResolve = (
   importer?: string
 ): string | undefined => {
   try {
-    const req = importer ? createRequire(importer) : require;
+    let req = require;
+    if (importer) {
+      let cleanedImporter = importer;
+      if (cleanedImporter.startsWith('\0')) cleanedImporter = cleanedImporter.slice(1);
+      cleanedImporter = cleanedImporter.replace(/[?#].*$/, '');
+      if (path.isAbsolute(cleanedImporter)) {
+        req = createRequire(cleanedImporter);
+      }
+    }
     return toPosixPath(req.resolve(request));
   } catch {
     return undefined;
