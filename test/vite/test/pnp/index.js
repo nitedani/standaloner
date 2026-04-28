@@ -1,1 +1,1 @@
-const _ = require('lodash'); const { builder } = require('standaloner'); async function run() { await builder({ entry: 'index.js', outDir: 'dist' }); } run();
+const _ = require('lodash'); const standaloner = require('standaloner'); async function run() { await standaloner({ input: 'index.js', outDir: 'dist' }); } run();
