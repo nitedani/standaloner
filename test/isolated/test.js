@@ -79,13 +79,13 @@ console.log('✓ Isolated build has no shared chunks\n');
 const hasSharedChunks = normalFiles.some(f => 
   !['functionA.mjs', 'functionB.mjs', 'functionC.mjs'].includes(f)
 );
-if (!hasSharedChunks) {
-  console.log('⚠ Warning: Normal build did not create shared chunks (might be expected for small files)\n');
-} else {
+if (hasSharedChunks) {
   const sharedChunks = normalFiles.filter(f => 
     !['functionA.mjs', 'functionB.mjs', 'functionC.mjs'].includes(f)
   );
   console.log(`✓ Normal build created shared chunks: ${sharedChunks.join(', ')}\n`);
+} else {
+  console.log('⚠ Warning: Normal build did not create shared chunks (might be expected for small files)\n');
 }
 
 // Test 5: Verify isolated files are self-contained and executable

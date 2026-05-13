@@ -53,7 +53,7 @@ const staticFiles = fs.readdirSync(staticDir, { recursive: true }).map(f => Stri
 console.log('\nAssets found in .static:');
 staticFiles.forEach(file => console.log('  -', file));
 
-let missingAssets = [];
+const missingAssets = [];
 for (const asset of expectedAssets) {
   const found = staticFiles.some(f => f.includes(path.basename(asset)));
   if (found) {

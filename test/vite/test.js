@@ -28,7 +28,7 @@ const staticFiles = fs.readdirSync(staticDir, { recursive: true }).map(f => Stri
 console.log('\nAssets found in .static:');
 staticFiles.forEach(file => console.log('  -', file));
 
-let missingAssets = [];
+const missingAssets = [];
 for (const asset of expectedAssets) {
   const found = staticFiles.some(f => f.includes(asset));
   if (found) {
@@ -64,7 +64,7 @@ for (const file of expectedFiles) {
 console.log('\n=== Checking Asset References ===\n');
 const indexMjs = path.join(serverDir, 'index.mjs');
 if (fs.existsSync(indexMjs)) {
-  const indexContent = fs.readFileSync(indexMjs, 'utf-8');
+  const indexContent = fs.readFileSync(indexMjs, 'utf8');
 
   // Check that asset references were transformed
   const hasUrlTransform = indexContent.includes('new URL(') && indexContent.includes('import.meta.url');

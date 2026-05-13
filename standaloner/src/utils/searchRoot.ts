@@ -28,7 +28,7 @@ function hasWorkspacePackageJSON(root: string): boolean {
     return false;
   }
   try {
-    const content = JSON.parse(fs.readFileSync(path, 'utf-8')) || {};
+    const content = JSON.parse(fs.readFileSync(path, 'utf8')) || {};
     return !!content.workspaces;
   } catch {
     return false;
