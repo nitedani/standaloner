@@ -22,14 +22,11 @@ export const resolvePaths = (options: StandalonerOptions) => {
   const root = searchForPackageRoot(inputCommonDir);
 
   // Determine output directory
-  let outDir: string;
-  if (options.outDir) {
+  const outDir = options.outDir
     // If outDir is provided, resolve it relative to current working directory
-    outDir = path.resolve(process.cwd(), options.outDir);
-  } else {
+    ? path.resolve(process.cwd(), options.outDir)
     // If no outDir is provided, use a 'dist' subdirectory in the input common directory
-    outDir = path.join(inputCommonDir, 'dist');
-  }
+    : path.join(inputCommonDir, 'dist');
 
   // Find workspace root for monorepo support
   const baseDir = searchForWorkspaceRoot(inputCommonDir);

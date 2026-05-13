@@ -86,8 +86,9 @@ const standaloner = async (options: StandalonerOptions) => {
   plugins.push(viteTransformPlugin({ root }));
 
   const bundleOutput =
-    options.bundle !== false
-      ? await bundle({
+    options.bundle === false
+      ? null
+      : await bundle({
           ...bundleOptions,
           plugins,
           input: options.input,
@@ -97,8 +98,7 @@ const standaloner = async (options: StandalonerOptions) => {
           },
           cleanup: options.cleanup,
           root,
-        })
-      : null;
+        });
 
   if (shouldTrace) {
     await trace({
