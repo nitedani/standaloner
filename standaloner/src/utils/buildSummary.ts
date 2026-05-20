@@ -96,7 +96,7 @@ class BuildSummary {
   // Record asset emission
   public recordAsset(filePath: string, size: number): void {
     const fileName = path.basename(filePath);
-    const fileExt = path.extname(filePath).toLowerCase().substring(1) || 'unknown';
+    const fileExt = path.extname(filePath).toLowerCase().slice(1) || 'unknown';
 
     // Update total stats
     this.assets.totalAssets++;
@@ -227,7 +227,7 @@ class BuildSummary {
         }
 
         // Display each file and its reference types
-        for (const [fileName, refs] of Array.from(fileGroups.entries()).sort()) {
+        for (const [fileName, refs] of [...fileGroups.entries()].sort()) {
           const types = refs.map(r => r.type).join(', ');
           console.log(`  ${fileName} (${types})`);
         }

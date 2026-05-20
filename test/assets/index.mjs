@@ -10,7 +10,7 @@ console.log('=== Asset Detection Test ===\n');
 console.log('1. Testing URL references (new URL):');
 try {
   const url1 = new URL('./test-data.txt', import.meta.url);
-  const content1 = fs.readFileSync(url1, 'utf-8');
+  const content1 = fs.readFileSync(url1, 'utf8');
   console.log('   ✓ test-data.txt via URL:', content1.trim());
 } catch (e) {
   console.error('   ✗ Failed to load test-data.txt via URL:', e.message);
@@ -34,7 +34,7 @@ try {
 console.log('\n2. Testing path.join with __dirname:');
 try {
   const configPath = path.join(__dirname, 'config.json');
-  const configContent = fs.readFileSync(configPath, 'utf-8');
+  const configContent = fs.readFileSync(configPath, 'utf8');
   const config = JSON.parse(configContent);
   console.log('   ✓ config.json via path.join:', config);
 } catch (e) {
@@ -44,7 +44,7 @@ try {
 
 try {
   const nestedPath = path.join(__dirname, 'data', 'nested-file.csv');
-  const nestedContent = fs.readFileSync(nestedPath, 'utf-8');
+  const nestedContent = fs.readFileSync(nestedPath, 'utf8');
   console.log('   ✓ nested-file.csv via path.join:', nestedContent.split('\n')[0]);
 } catch (e) {
   console.error('   ✗ Failed to load nested-file.csv via path.join:', e.message);
@@ -63,7 +63,7 @@ try {
 }
 
 try {
-  const content = fs.readFileSync(fileURLToPath(new URL('./config.json', import.meta.url)), 'utf-8');
+  const content = fs.readFileSync(fileURLToPath(new URL('./config.json', import.meta.url)), 'utf8');
   console.log('   ✓ fs.readFileSync on config.json:', content.length, 'bytes');
 } catch (e) {
   console.error('   ✗ Failed fs.readFileSync on config.json:', e.message);
@@ -79,7 +79,7 @@ try {
   const exists = fs.existsSync(nodePath);
   console.log('   ✓ mock.node file exists:', exists);
   if (exists) {
-    const content = fs.readFileSync(nodePath, 'utf-8');
+    const content = fs.readFileSync(nodePath, 'utf8');
     console.log('   ✓ mock.node content:', content.trim());
   }
 } catch (e) {

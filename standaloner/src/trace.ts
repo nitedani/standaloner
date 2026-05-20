@@ -665,7 +665,7 @@ async function findOptionalDepRoot(
 
 async function readPkgJson(dir: string): Promise<PackageJson | null> {
   try {
-    return JSON.parse(await fs.readFile(path.join(dir, 'package.json'), 'utf-8'));
+    return JSON.parse(await fs.readFile(path.join(dir, 'package.json'), 'utf8'));
   } catch {
     return null;
   }
@@ -830,7 +830,7 @@ async function addNativeBinaries(tracedFiles: Record<string, TracedFile>): Promi
  */
 function compareVersions(v1 = DEFAULT_VERSION, v2 = DEFAULT_VERSION): number {
   // Basic parsing, ignores pre-release tags
-  const parsePart = (n: string): number => parseInt(n, 10) || 0;
+  const parsePart = (n: string): number => Number.parseInt(n, 10) || 0;
   const p1 = v1.split('-')[0]!.split('.').map(parsePart);
   const p2 = v2.split('-')[0]!.split('.').map(parsePart);
 

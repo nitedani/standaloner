@@ -339,14 +339,24 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
 
         // Generate replacement based on type
         let replacement = '';
-        if (type === 'url') {
-          replacement = `new URL(${JSON.stringify(relativePathWithDot)}, import.meta.url)`;
-        } else if (type === 'path' || type === 'fs') {
-          replacement = `new URL(${JSON.stringify(relativePathWithDot)}, import.meta.url).pathname`;
-        } else if (type === 'require' || type === 'load') {
-          replacement = `require(${JSON.stringify(relativePathWithDot)})`;
-        } else {
-          assert(false, `Unknown reference type: ${type}`);
+        switch (type) {
+          case 'url': {
+            replacement = `new URL(${JSON.stringify(relativePathWithDot)}, import.meta.url)`;
+            break;
+          }
+          case 'path': 
+          case 'fs': {
+            replacement = `new URL(${JSON.stringify(relativePathWithDot)}, import.meta.url).pathname`;
+            break;
+          }
+          case 'require': 
+          case 'load': {
+            replacement = `require(${JSON.stringify(relativePathWithDot)})`;
+            break;
+          }
+          default: {
+            assert(false, `Unknown reference type: ${type}`);
+          }
         }
 
         logVerbose(`Replaced ${placeholder} with ${replacement} (type: ${type})`);
@@ -429,27 +439,25 @@ function processNewURLNode(node: NewExpression, dirName: string): FileReference[
     filePath = urlPathArg.quasis[0]?.value.cooked || null;
   }
 
-  if (filePath !== null) {
-    if (filePath.startsWith('.') || path.isAbsolute(filePath)) {
-      assert(
-        'start' in node &&
-          typeof node.start === 'number' &&
-          'end' in node &&
-          typeof node.end === 'number',
-        'Node requires start/end'
-      );
-      return [
-        {
-          node: urlPathArg,
-          path: filePath,
-          transformInfo: {
-            type: 'url',
-            start: node.start,
-            end: node.end,
-          },
+  if (filePath !== null && (filePath.startsWith('.') || path.isAbsolute(filePath!))) {
+    assert(
+      'start' in node &&
+        typeof node.start === 'number' &&
+        'end' in node &&
+        typeof node.end === 'number',
+      'Node requires start/end'
+    );
+    return [
+      {
+        node: urlPathArg,
+        path: filePath!,
+        transformInfo: {
+          type: 'url',
+          start: node.start,
+          end: node.end,
         },
-      ];
-    }
+      },
+    ];
   }
   return null;
 }
@@ -606,7 +614,7 @@ function processRequireCall(node: CallExpression, dirName: string): FileReferenc
 
 /** Check if node is fs.someFunc(...) */
 function isFsOperation(node: Node): node is CallExpression {
-  if (node.type !== 'CallExpression' || node.arguments.length < 1) return false;
+  if (node.type !== 'CallExpression' || node.arguments.length === 0) return false;
 
   const callee = node.callee;
   if (callee.type !== 'MemberExpression') return false;
