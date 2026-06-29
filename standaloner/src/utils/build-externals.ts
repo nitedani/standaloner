@@ -6,6 +6,7 @@ export { buildExternalsPlugin };
 export { externalPatterns };
 export { clearImportOrigins, getOriginPaths, multiVersionConflicts };
 export type { VersionConflict };
+export type { ApplyToEnvironment };
 
 /**
  * Captured during bundling: for each external specifier, a map of resolved on-disk
@@ -496,10 +497,13 @@ const isExternal = (packageId: string) => {
   return externalRegex.test(packageId);
 };
 
-const buildExternalsPlugin = (external?: (string | RegExp)[]): Plugin => ({
+type ApplyToEnvironment = NonNullable<Plugin['applyToEnvironment']>;
+
+const buildExternalsPlugin = (external?: (string | RegExp)[], applyToEnvironment?: ApplyToEnvironment): Plugin => ({
   apply: 'build',
   name: 'standaloner:default-externals',
   enforce: 'pre',
+  applyToEnvironment,
   buildStart() {
     clearImportOrigins();
   },
