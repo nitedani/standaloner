@@ -49,7 +49,6 @@ const standaloner = (
             external: [...builtinModules, ...builtinModules.map(m => `node:${m}`)],
           },
           build: {
-            target: 'es2022',
             minify: minify && !bundle_,
           },
         };
