@@ -1,37 +1,37 @@
 {
-    "name": "standaloner",
-    "version": "0.3.2",
-    "type": "module",
-    "main": "dist/index.js",
-    "exports": {
-        ".": "./dist/index.js",
-        "./vite": "./dist/vite.js"
-    },
-    "repository": "github:nitedani/standaloner",
-    "license": "MIT",
-    "engines": {
-        "node": ">=22"
-    },
-    "scripts": {
-        "build": "rm -rf dist && tsc",
-        "dev": "tsc -w"
-    },
-    "dependencies": {
-        "@vercel/nft": "^1.5.0",
-        "acorn": "^8.15.0",
-        "estree-walker": "^3.0.3",
-        "magic-string": "^0.30.21",
-        "p-limit": "^7.2.0",
-        "rolldown": "^1.0.3"
-    },
-    "devDependencies": {
-        "@types/estree": "^1.0.8",
-        "@types/node": "^22.0.0",
-        "rollup": "^4.54.0",
-        "typescript": "^5.9.3",
-        "vite": "^7.3.0"
-    },
-    "files": [
-        "dist/"
-    ]
+  "name": "standaloner",
+  "version": "0.3.3",
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./vite": "./dist/vite.js"
+  },
+  "repository": "github:nitedani/standaloner",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc",
+    "dev": "tsc -w"
+  },
+  "dependencies": {
+    "@vercel/nft": "^1.5.0",
+    "acorn": "^8.15.0",
+    "estree-walker": "^3.0.3",
+    "magic-string": "^0.30.21",
+    "p-limit": "^7.2.0",
+    "rolldown": "^1.0.3"
+  },
+  "devDependencies": {
+    "@types/estree": "^1.0.8",
+    "@types/node": "^22.0.0",
+    "rollup": "^4.54.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0"
+  },
+  "files": [
+    "dist/"
+  ]
 }
