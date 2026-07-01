@@ -3,7 +3,7 @@ import { normalizePath, type Plugin } from 'vite';
 import { assetRelocatorPlugin } from './relocate.js';
 import { trace } from './trace.js';
 import buildSummary from './utils/buildSummary.js';
-import { buildExternalsPlugin } from './utils/build-externals.js';
+import { buildExternalsPlugin, type ApplyToEnvironment } from './utils/build-externals.js';
 import { searchForWorkspaceRoot } from './utils/searchRoot.js';
 import { assertUsage, toPosixPath } from './utils/utils.js';
 import { builtinModules } from 'node:module';
@@ -11,6 +11,8 @@ import { bundle, type BundleOptions } from './bundle.js';
 import { logWarning, setVerbose } from './utils/logging.js';
 
 export { standaloner as default, standaloner };
+
+type PartialEnvironment = Parameters<ApplyToEnvironment>[0];
 
 const standaloner = (
   options: {
@@ -27,9 +29,10 @@ const standaloner = (
   const shouldTrace = options.trace ?? true;
   const minify = options.minify ?? false;
   const bundle_ = options.bundle ?? false;
+   const applyToServerEnvironment = (environment: PartialEnvironment) => environment.name !== 'client' && environment.config.consumer !== 'client';
 
   return [
-    buildExternalsPlugin(options.external) as Plugin,
+    buildExternalsPlugin(options.external, applyToServerEnvironment) as Plugin,
     assetRelocatorPlugin({
       outputDir: '.static',
     }),
@@ -37,10 +40,10 @@ const standaloner = (
       name: 'standaloner',
       apply: 'build',
       applyToEnvironment(environment) {
-        return environment.config.consumer !== 'client';
+        return applyToServerEnvironment(environment);
       },
-      configEnvironment(_name, config) {
-        if (config.consumer === 'client') {
+      configEnvironment(name, config) {
+        if (name === 'client' || config.consumer === 'client') {
           return;
         }
         return {
