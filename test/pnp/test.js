@@ -26,7 +26,7 @@ try {
   );
   fs.writeFileSync(path.join(tmpDir, 'yarn.lock'), '');
 
-  console.log('Installing dependencies (lodash4, lodash, esbuild, dual, cjs-parent, linked, linked-renamed, dual-fork, fork-user, linked-bundled, uses-a, uses-b, utils, utils-a-renamed, alias-v3, alias-v4, local standaloner)...');
+  console.log('Installing dependencies (lodash4, lodash, esbuild, dual, cjs-parent, linked, linked-renamed, dual-fork, fork-user, linked-bundled, uses-a, uses-b, utils, utils-a-renamed, nested-type, alias-v3, alias-v4, local standaloner)...');
   execFileSync(
     'corepack',
     [
@@ -56,6 +56,8 @@ try {
       `utils@portal:${path.join(__dirname, 'utils-b').replace(/\\/g, '/')}`,
       // uses-a's utils, which the app also imports under another name
       `utils-a-renamed@portal:${path.join(__dirname, 'utils-a').replace(/\\/g, '/')}`,
+      // its files are under a package.json that only sets "type"
+      `nested-type@portal:${path.join(__dirname, 'nested-type').replace(/\\/g, '/')}`,
       // the same package, bundled under another name: its import export
       `linked-bundled@portal:${path.join(__dirname, 'linked').replace(/\\/g, '/')}`,
       // the same package, imported under another name through a symlinked folder
@@ -81,15 +83,16 @@ import usesA from 'uses-a';
 import usesB from 'uses-b';
 import utils from 'utils';
 import utilsA from 'utils-a-renamed';
+import nestedType from 'nested-type';
 import v3 from 'alias-v3';
 import v4 from 'alias-v4';
-console.log(format(_.defaults({ a: 1 }, { a: 3, b: 2 })), transformSync('let a = 1').code.trim(), cjsParent, lodashFork.VERSION, linked, renamed, bundled, fork, forkUser, usesA + usesB, utils, utilsA, v3, v4);
+console.log(format(_.defaults({ a: 1 }, { a: 3, b: 2 })), transformSync('let a = 1').code.trim(), cjsParent, lodashFork.VERSION, linked, renamed, bundled, fork, forkUser, usesA + usesB, utils, utilsA, nestedType, v3, v4);
 `
   );
   fs.writeFileSync(
     path.join(tmpDir, 'build.js'),
     `import standaloner from 'standaloner';
-await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lodash4', 'lodash', 'esbuild', 'dual', 'cjs-parent', 'linked', 'linked-renamed', 'dual-fork', 'fork-user', 'uses-a', 'uses-b', 'utils', 'utils-a-renamed', 'alias-v3', 'alias-v4'] } });
+await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lodash4', 'lodash', 'esbuild', 'dual', 'cjs-parent', 'linked', 'linked-renamed', 'dual-fork', 'fork-user', 'uses-a', 'uses-b', 'utils', 'utils-a-renamed', 'nested-type', 'alias-v3', 'alias-v4'] } });
 `
   );
 
@@ -102,7 +105,7 @@ await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lod
   }).toString();
   console.log('Output:', output.trim());
 
-  const expected = 'esm {"a":1,"b":2} let a = 1; cjs "cjs-parent" lodash-fork linked esm linked esm linked esm fork local "fork-user" AB B A 3.10.1 4.17.21';
+  const expected = 'esm {"a":1,"b":2} let a = 1; cjs "cjs-parent" lodash-fork linked esm linked esm linked esm fork local "fork-user" AB B A nested-type 3.10.1 4.17.21';
   if (output.trim() !== expected) {
     throw new Error(`Expected '${expected}', got '${output.trim()}'`);
   }

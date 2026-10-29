@@ -376,7 +376,15 @@ async function resolveWorkspacePackage(
   baseDir: string,
   pnpDirNames: Map<string, string>
 ): Promise<PkgInfo | null> {
-  const found = await readContainingPkgJson(absoluteFilePath);
+  // Under PnP a local folder's root is known: a nested package.json, such as a build folder's
+  // {"type":"module"}, doesn't start another package
+  const pnpRoot = [...pnpDirNames.keys()]
+    .filter(dir => absoluteFilePath.startsWith(dir + path.sep))
+    .sort((a, b) => b.length - a.length)[0];
+  const pnpPkgJson = pnpRoot && (await readPkgJson(pnpRoot));
+  const found = pnpPkgJson
+    ? { root: pnpRoot, pkgJson: pnpPkgJson }
+    : await readContainingPkgJson(absoluteFilePath);
   if (!found) return null;
   const { root: pkgRoot, pkgJson } = found;
 
