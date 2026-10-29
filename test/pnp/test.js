@@ -109,6 +109,29 @@ await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lod
   console.log(
     "✓ Externals traced from Yarn PnP: npm: aliases, both builds of dual, portal: packages under their own and another name, esbuild's platform binary"
   );
+
+  // Without the app's import of utils-a under another name, its folder still sorts first
+  fs.writeFileSync(
+    path.join(tmpDir, 'utils.js'),
+    `import utils from 'utils';
+import usesA from 'uses-a';
+console.log(utils, usesA);
+`
+  );
+  fs.writeFileSync(
+    path.join(tmpDir, 'build-utils.js'),
+    `import standaloner from 'standaloner';
+await standaloner({ input: 'utils.js', outDir: 'dist-utils', bundle: { external: ['utils', 'uses-a'] } });
+`
+  );
+  execSync('corepack yarn node build-utils.js', { stdio: 'inherit', cwd: tmpDir });
+  const utilsOutput = execFileSync('node', [path.join(tmpDir, 'dist-utils', 'utils.mjs')], {
+    cwd: tmpDir,
+  }).toString();
+  if (utilsOutput.trim() !== 'B A') {
+    throw new Error(`Expected 'B A', got '${utilsOutput.trim()}'`);
+  }
+  console.log("✓ The app's portal: utils keeps its name when a dependency's sorts first");
 } finally {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 }
