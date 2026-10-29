@@ -1,0 +1,8 @@
+{
+  "name": "alias-v3",
+  "version": "1.0.0",
+  "main": "index.cjs",
+  "dependencies": {
+    "lodash-alias": "npm:lodash@3.10.1"
+  }
+}
