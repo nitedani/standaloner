@@ -161,13 +161,13 @@ function pnpPackageDir(pkgName: string, issuer: string): string | undefined {
   }
 }
 
+/** npm: aliases found under PnP, per importing file: the name and version of the package each installs. */
+type PnpAliases = Map<string, { parent: string; alias: string; name: string; version: string }>;
+
 /**
  * Under Yarn PnP there is no node_modules tree for nft to walk: ask PnP for the package's
  * folder and let nft's own resolver apply `exports` from a file next to it.
  */
-/** npm: aliases found under PnP, per importing file: the name and version of the package each installs. */
-type PnpAliases = Map<string, { parent: string; alias: string; name: string; version: string }>;
-
 async function pnpResolve(
   id: string,
   parent: string,
@@ -180,22 +180,27 @@ async function pnpResolve(
   if (!pkgDir) return undefined;
   const nodeModulesDir = pkgDir.lastIndexOf(path.sep + 'node_modules' + path.sep);
   const dirName = pkgDir.slice(nodeModulesDir + 'node_modules'.length + 2).split(path.sep).join('/');
-  if (nodeModulesDir !== -1 && dirName.split('/').length === (dirName.startsWith('@') ? 2 : 1)) {
-    // An npm: alias sits in the folder of the package it installs, under that package's name
-    if (dirName !== pkgName) {
-      const version = (await readPkgJson(pkgDir))?.version || DEFAULT_VERSION;
-      aliases.set(`${parent}\0${pkgName}`, { parent, alias: pkgName, name: dirName, version });
-    }
-    const issuer = path.join(pkgDir.slice(0, nodeModulesDir), 'index.js');
-    return nftDefaultResolve(dirName + id.slice(pkgName.length), issuer, job, cjsResolve);
+  const inNodeModules =
+    nodeModulesDir !== -1 && dirName.split('/').length === (dirName.startsWith('@') ? 2 : 1);
+  const pkgJson = await readPkgJson(pkgDir);
+  // A workspace, portal: or link: package has no node_modules folder above it
+  if (!inNodeModules && !pkgJson) return undefined;
+  // An npm: alias, or a workspace or portal: package imported under another name
+  const name = inNodeModules ? dirName : pkgJson?.name || pkgName;
+  if (name !== pkgName) {
+    const version = pkgJson?.version || DEFAULT_VERSION;
+    aliases.set(`${parent}\0${pkgName}`, { parent, alias: pkgName, name, version });
   }
-  // A workspace, portal: or link: package has no node_modules folder above it: nft applies its
-  // `exports` as for the package importing itself, else resolves the path inside its folder
-  if (!existsSync(path.join(pkgDir, 'package.json'))) return undefined;
-  return nftDefaultResolve(id, path.join(pkgDir, 'index.js'), job, cjsResolve).catch(() =>
-    nftDefaultResolve(pkgDir + id.slice(pkgName.length), parent, job, cjsResolve).catch(
-      () => undefined
-    )
+  const subpath = id.slice(pkgName.length);
+  if (inNodeModules) {
+    const issuer = path.join(pkgDir.slice(0, nodeModulesDir), 'index.js');
+    return nftDefaultResolve(name + subpath, issuer, job, cjsResolve);
+  }
+  // nft applies its `exports` as for the package importing itself, else resolves the path
+  // inside its folder
+  const selfIssuer = path.join(pkgDir, 'index.js');
+  return nftDefaultResolve(name + subpath, selfIssuer, job, cjsResolve).catch(() =>
+    nftDefaultResolve(pkgDir + subpath, parent, job, cjsResolve).catch(() => undefined)
   );
 }
 
