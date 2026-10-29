@@ -390,11 +390,9 @@ async function processTracedFiles(
  * (every folder its own copy if the grouping never settles).
  */
 function assignCopies(tracedFiles: Record<string, TracedFile>): Map<string, string> {
-  const packages = new Map<string, TracedFile>(); // pkgPathReal -> a file of that package
   const deps = new Map<string, Map<string, string>>(); // pkgPathReal -> dependency name -> its pkgPathReal
   const appImported = new Set<string>(); // pkgPathReal of packages the app's own files import
   for (const file of Object.values(tracedFiles)) {
-    packages.set(file.pkgPathReal, file);
     for (const parentPath of file.parents) {
       const parentFile = tracedFiles[parentPath];
       if (!parentFile) appImported.add(file.pkgPathReal);
@@ -407,8 +405,8 @@ function assignCopies(tracedFiles: Record<string, TracedFile>): Map<string, stri
   // load more dependencies pick their copy first, so one that loads fewer joins a matching copy
   // instead of opening one of its own. Paths break ties, so every build names copies alike.
   const loadCount = (folder: string) => deps.get(folder)?.size ?? 0;
-  const folders = [...packages.keys()].sort(
-    (a, b) =>
+  const folders = uniquePackages(tracedFiles).sort(
+    ({ pkgPathReal: a }, { pkgPathReal: b }) =>
       Number(appImported.has(b)) - Number(appImported.has(a)) ||
       loadCount(b) - loadCount(a) ||
       a.localeCompare(b)
@@ -416,12 +414,11 @@ function assignCopies(tracedFiles: Record<string, TracedFile>): Map<string, stri
 
   // Each pass groups every name@version anew, by the copies its dependencies got in the pass
   // before, until a pass changes nothing
-  let copies = new Map(folders.map(folder => [folder, packages.get(folder)!.pkgVersion]));
+  let copies = new Map(folders.map(({ pkgPathReal, pkgVersion }) => [pkgPathReal, pkgVersion]));
   for (let pass = 0; pass <= folders.length; pass++) {
     const next = new Map<string, string>();
     const groups = new Map<string, Array<Map<string, string>>>(); // name@version -> each copy's loads
-    for (const folder of folders) {
-      const { pkgName, pkgVersion } = packages.get(folder)!;
+    for (const { pkgPathReal: folder, pkgName, pkgVersion } of folders) {
       const group = groups.get(`${pkgName}@${pkgVersion}`) ?? [];
       groups.set(`${pkgName}@${pkgVersion}`, group);
       const loads = [...(deps.get(folder) ?? [])].map(
@@ -434,14 +431,15 @@ function assignCopies(tracedFiles: Record<string, TracedFile>): Map<string, stri
       for (const [name, dep] of loads) group[n]!.set(name, dep);
       next.set(folder, n ? `${pkgVersion}_${n}` : pkgVersion);
     }
-    if (folders.every(folder => next.get(folder) === copies.get(folder))) return copies;
+    if (folders.every(({ pkgPathReal }) => next.get(pkgPathReal) === copies.get(pkgPathReal))) {
+      return copies;
+    }
     copies = next;
   }
   // No pass settled: one copy per folder loads what the source loads
   const seen = new Map<string, number>(); // name@version -> folders so far
   return new Map(
-    folders.map(folder => {
-      const { pkgName, pkgVersion } = packages.get(folder)!;
+    folders.map(({ pkgPathReal: folder, pkgName, pkgVersion }) => {
       const n = seen.get(`${pkgName}@${pkgVersion}`) ?? 0;
       seen.set(`${pkgName}@${pkgVersion}`, n + 1);
       return [folder, n ? `${pkgVersion}_${n}` : pkgVersion];
