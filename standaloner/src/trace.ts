@@ -173,34 +173,42 @@ async function pnpResolve(
   parent: string,
   job: Parameters<typeof nftDefaultResolve>[2],
   cjsResolve: boolean,
-  aliases: PnpAliases
+  aliases: PnpAliases,
+  dirNames: Map<string, string>
 ): Promise<string | string[] | undefined> {
   const pkgName = id.split('/').slice(0, id.startsWith('@') ? 2 : 1).join('/');
   const pkgDir = pnpPackageDir(pkgName, parent);
   if (!pkgDir) return undefined;
+  const subpath = id.slice(pkgName.length);
   const nodeModulesDir = pkgDir.lastIndexOf(path.sep + 'node_modules' + path.sep);
   const dirName = pkgDir.slice(nodeModulesDir + 'node_modules'.length + 2).split(path.sep).join('/');
   const inNodeModules =
     nodeModulesDir !== -1 && dirName.split('/').length === (dirName.startsWith('@') ? 2 : 1);
-  const pkgJson = await readPkgJson(pkgDir);
-  // A workspace, portal: or link: package has no node_modules folder above it
-  if (!inNodeModules && !pkgJson) return undefined;
-  // An npm: alias, or a workspace or portal: package imported under another name
-  const name = inNodeModules ? dirName : pkgJson?.name || pkgName;
-  if (name !== pkgName) {
-    const version = pkgJson?.version || DEFAULT_VERSION;
-    aliases.set(`${parent}\0${pkgName}`, { parent, alias: pkgName, name, version });
-  }
-  const subpath = id.slice(pkgName.length);
   if (inNodeModules) {
+    // An npm: alias sits in the folder of the package it installs, under that package's name
+    if (dirName !== pkgName) {
+      const version = (await readPkgJson(pkgDir))?.version || DEFAULT_VERSION;
+      aliases.set(`${parent}\0${pkgName}`, { parent, alias: pkgName, name: dirName, version });
+    }
     const issuer = path.join(pkgDir.slice(0, nodeModulesDir), 'index.js');
-    return nftDefaultResolve(name + subpath, issuer, job, cjsResolve);
+    return nftDefaultResolve(dirName + subpath, issuer, job, cjsResolve);
+  }
+  // A workspace, portal: or link: package has no node_modules folder above it. It is copied
+  // under the first name it is imported by, as node_modules names its folder, and other names
+  // link to it
+  const pkgJson = await readPkgJson(pkgDir);
+  if (!pkgJson) return undefined;
+  if (!dirNames.has(pkgDir)) dirNames.set(pkgDir, pkgName);
+  const name = dirNames.get(pkgDir)!;
+  if (name !== pkgName) {
+    const version = pkgJson.version || DEFAULT_VERSION;
+    aliases.set(`${parent}\0${pkgName}`, { parent, alias: pkgName, name, version });
   }
   // nft applies its `exports` as for the package importing itself, else resolves the path
   // inside its folder
   const selfIssuer = path.join(pkgDir, 'index.js');
-  return nftDefaultResolve(name + subpath, selfIssuer, job, cjsResolve).catch(() =>
-    nftDefaultResolve(pkgDir + subpath, parent, job, cjsResolve).catch(() => undefined)
+  return nftDefaultResolve((pkgJson.name || pkgName) + subpath, selfIssuer, job, cjsResolve).catch(
+    () => nftDefaultResolve(pkgDir + subpath, parent, job, cjsResolve).catch(() => undefined)
   );
 }
 
@@ -221,6 +229,7 @@ async function traceProjectFiles(
   }
 
   const traceBase = traceBaseFor(baseDir);
+  const pnpDirNames = new Map<string, string>();
   const traceResults = await nodeFileTrace(entryFiles, {
     base: traceBase,
     processCwd: baseDir,
@@ -233,7 +242,7 @@ async function traceProjectFiles(
       try {
         return await nftDefaultResolve(id, parent, job, cjsResolve);
       } catch (err) {
-        const pnpResolved = await pnpResolve(id, parent, job, cjsResolve, pnpAliases);
+        const pnpResolved = await pnpResolve(id, parent, job, cjsResolve, pnpAliases, pnpDirNames);
         if (pnpResolved) return pnpResolved;
         const fallback = await pickLatestOrigin(id);
         if (fallback) return fallback;
@@ -263,7 +272,7 @@ async function traceProjectFiles(
   for (let i = 0; i < filesToProcess.length; i += batchSize) {
     const batch = filesToProcess.slice(i, i + batchSize);
     const results = await Promise.all(
-      batch.map(file => processSingleFile(file, traceResults, traceBase))
+      batch.map(file => processSingleFile(file, traceResults, traceBase, pnpDirNames))
     );
     // Add successfully processed files (those associated with a package) to the map
     for (const result of results) {
@@ -284,7 +293,8 @@ async function traceProjectFiles(
 async function processSingleFile(
   fileRelativePath: string,
   traceResults: NodeFileTraceResult,
-  baseDir: string
+  baseDir: string,
+  pnpDirNames: Map<string, string>
 ): Promise<TracedFile | null> {
   const posixPath = toPosixPath(fileRelativePath);
   const fullPath = path.join(baseDir, posixPath);
@@ -307,7 +317,7 @@ async function processSingleFile(
 
     const pkgInfo = posixPath.includes('node_modules/')
       ? await resolveNodeModulesPackage(posixPath, baseDir)
-      : await resolveWorkspacePackage(realPath, baseDir);
+      : await resolveWorkspacePackage(realPath, baseDir, pnpDirNames);
     if (!pkgInfo) return null;
     return { ...baseInfo, ...pkgInfo };
   } catch (error: any) {
@@ -322,18 +332,19 @@ async function processSingleFile(
  */
 async function resolveWorkspacePackage(
   absoluteFilePath: string,
-  baseDir: string
+  baseDir: string,
+  pnpDirNames: Map<string, string>
 ): Promise<PkgInfo | null> {
   const found = await readContainingPkgJson(absoluteFilePath);
   if (!found) return null;
   const { root: pkgRoot, pkgJson } = found;
 
-  if (!pkgJson.name) {
+  const pkgName = pnpDirNames.get(pkgRoot) || pkgJson.name;
+  if (!pkgName) {
     logWarning(`Workspace package at ${pkgRoot} skipped: missing name.`);
     return null;
   }
 
-  const pkgName = pkgJson.name;
   const pkgVersion = pkgJson.version || DEFAULT_VERSION;
   const pkgPath = path.relative(baseDir, pkgRoot); // relative to the tracing base directory
   const pkgPathReal = pkgRoot; // already canonical (walked from a realpath)
