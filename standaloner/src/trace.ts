@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { createRequire } from 'node:module';
+import Module from 'node:module';
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { platform } from 'node:os';
@@ -110,7 +110,7 @@ async function trace({
   // Pick up platform-specific optionalDependencies that nft can't resolve statically
   // (rollup, esbuild, sharp, @parcel/watcher, @node-rs/* etc. load their native binding
   // via a dynamic require keyed on process.platform/arch).
-  await traceOptionalDeps(tracedFiles, baseDir);
+  await traceOptionalDeps(tracedFiles, traceBaseFor(baseDir));
 
   // Pick up prebuilt native binaries that nft's static analysis misses
   // (node-gyp-build, prebuild-install, napi-rs — dynamic require by platform/arch).
@@ -142,6 +142,34 @@ async function trace({
   // Don't log here, the build summary will show the results
 }
 
+type PnpApi = { resolveToUnqualified(request: string, issuer: string): string | null };
+const findPnpApi = (Module as { findPnpApi?: (lookupSource: string) => PnpApi | null }).findPnpApi;
+
+/** Under Yarn PnP, packages live in zip archives outside the project (Yarn's global cache by default). */
+function traceBaseFor(baseDir: string): string {
+  return process.versions.pnp ? path.parse(baseDir).root : baseDir;
+}
+
+/**
+ * Under Yarn PnP there is no node_modules tree for nft to walk: ask PnP for the package's
+ * folder and return a file next to it, from which nft's own resolver applies `exports`.
+ */
+function pnpIssuerFor(id: string, parent: string): string | undefined {
+  const pnpApi = findPnpApi?.(parent);
+  if (!pnpApi) return undefined;
+  const pkgName = id.split('/').slice(0, id.startsWith('@') ? 2 : 1).join('/');
+  let pkgDir: string | null;
+  try {
+    pkgDir = pnpApi.resolveToUnqualified(pkgName, parent);
+  } catch {
+    return undefined;
+  }
+  const pkgSuffix = path.join('node_modules', pkgName);
+  pkgDir = pkgDir && path.normalize(pkgDir).replace(/[\\/]+$/, '');
+  if (!pkgDir?.endsWith(path.sep + pkgSuffix)) return undefined;
+  return path.join(pkgDir.slice(0, -pkgSuffix.length), 'index.js');
+}
+
 /**
  * Runs Node File Trace and processes results to build a map of dependency files with package metadata.
  */
@@ -157,10 +185,12 @@ async function traceProjectFiles(
     await emitMultiVersionWarning(conflict, baseDir);
   }
 
+  const traceBase = traceBaseFor(baseDir);
   const traceResults = await nodeFileTrace(entryFiles, {
-    base: baseDir,
-    // Default-first: let nft's own resolution run as today. Only on miss, try our captured
-    // phantom-dep map.
+    base: traceBase,
+    processCwd: baseDir,
+    // Default-first: let nft's own resolution run as today. Only on miss, try Yarn PnP, then
+    // our captured phantom-dep map.
     // When multiple versions are captured, pick the highest semver: the bundler has
     // already collapsed the external to a single runtime import, and shipping the newer
     // copy is generally safer (APIs are typically backwards-compatible).
@@ -168,19 +198,15 @@ async function traceProjectFiles(
       try {
         return await nftDefaultResolve(id, parent, job, cjsResolve);
       } catch (err) {
-        try {
-          const parentFile = parent ? path.resolve(baseDir, parent) : path.join(baseDir, 'index.js');
-          const req = createRequire(parentFile);
-          return toPosixPath(req.resolve(id));
-        } catch {
-          const fallback = await pickLatestOrigin(id);
-          if (fallback) return fallback;
-          throw err;
-        }
+        const pnpIssuer = pnpIssuerFor(id, parent);
+        if (pnpIssuer) return nftDefaultResolve(id, pnpIssuer, job, cjsResolve);
+        const fallback = await pickLatestOrigin(id);
+        if (fallback) return fallback;
+        throw err;
       }
     },
   });
-  const relOutDir = path.relative(baseDir, outDir);
+  const relOutDir = path.relative(traceBase, outDir);
 
   // Filter out NFT internals, entry points, system files, and files already in output
   const filesToProcess = [...traceResults.fileList].filter(file => {
@@ -201,7 +227,7 @@ async function traceProjectFiles(
   for (let i = 0; i < filesToProcess.length; i += batchSize) {
     const batch = filesToProcess.slice(i, i + batchSize);
     const results = await Promise.all(
-      batch.map(file => processSingleFile(file, traceResults, baseDir))
+      batch.map(file => processSingleFile(file, traceResults, traceBase))
     );
     // Add successfully processed files (those associated with a package) to the map
     for (const result of results) {
