@@ -211,10 +211,10 @@ async function traceProjectFiles(
   // Filter out NFT internals, entry points, system files, and files already in output
   const filesToProcess = [...traceResults.fileList].filter(file => {
     const reason = traceResults.reasons.get(file);
-    // Exclude initial files, system paths, and anything already inside the target output dir
+    // Exclude initial files, system paths outside the project, and anything already inside the target output dir
     return !(
       reason?.type.includes('initial') ||
-      file.startsWith('usr/') ||
+      (file.startsWith('usr/') && !path.join(traceBase, file).startsWith(baseDir + path.sep)) ||
       file.startsWith(relOutDir)
     );
   });
