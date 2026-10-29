@@ -56,7 +56,7 @@ if (JSON.stringify(copies) !== JSON.stringify(expectedCopies)) {
 }
 console.log('✓ Identical installs share one copy\n');
 
-// standaloner looks for prebuilt binaries (*.node) in every traced install, so each copy ships one
+// standaloner adds the prebuilt binaries (*.node) nothing imports to each output copy
 const missing = expectedCopies['peer-host'].filter(
   copy => !fs.existsSync(path.join(nodeModules, '.versions', copy, 'proof.node'))
 );
