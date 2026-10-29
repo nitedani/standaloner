@@ -316,13 +316,15 @@ async function processTracedFiles(
   tracedFiles: Record<string, TracedFile>,
   { nodeModulesPath, versionsPath }: { nodeModulesPath: string; versionsPath: string }
 ): Promise<void> {
-  // Group files by package name and version for easier processing
-  const packageRegistry: Record<string, Record<string, string[]>> = {}; // { [pkgName]: { [version]: [filePath, ...] } }
+  // Group files by package name and output copy for easier processing
+  const copies = assignCopies(tracedFiles);
+  const packageRegistry: Record<string, Record<string, string[]>> = {}; // { [pkgName]: { [copy]: [filePath, ...] } }
   for (const file of Object.values(tracedFiles)) {
     // Assumes file processing already filtered out non-package files
+    const copy = copies.get(file.pkgPathReal)!;
     packageRegistry[file.pkgName] ??= {};
-    packageRegistry[file.pkgName]![file.pkgVersion] ??= [];
-    packageRegistry[file.pkgName]![file.pkgVersion]!.push(file.path);
+    packageRegistry[file.pkgName]![copy] ??= [];
+    packageRegistry[file.pkgName]![copy]!.push(file.path);
   }
 
   const copyTasks: Promise<void>[] = [];
@@ -368,7 +370,7 @@ async function processTracedFiles(
 
   logVerbose('Creating dependency symlinks...');
   // Create necessary symlinks *between* packages for multi-version resolution
-  await createDependencySymlinks(tracedFiles, multiVersionPackages, {
+  await createDependencySymlinks(tracedFiles, copies, multiVersionPackages, {
     nodeModulesPath,
     versionsPath,
   });
@@ -376,6 +378,57 @@ async function processTracedFiles(
   logVerbose('Creating top-level symlinks...');
   // Finally, create the top-level symlinks for the newest versions of multi-version packages
   await Promise.all(topLevelSymlinkTasks.map(task => createSymlink(task.source, task.target)));
+}
+
+/**
+ * Maps each traced package folder (pkgPathReal) to its output copy: `<version>`, or
+ * `<version>_<n>` when folders of one name@version load different copies of a dependency.
+ */
+function assignCopies(tracedFiles: Record<string, TracedFile>): Map<string, string> {
+  const packages = new Map<string, TracedFile>(); // pkgPathReal -> a file of that package
+  const deps = new Map<string, Map<string, string>>(); // pkgPathReal -> dependency name -> its pkgPathReal
+  let copies = new Map<string, string>(); // pkgPathReal -> output copy
+  for (const file of Object.values(tracedFiles)) {
+    packages.set(file.pkgPathReal, file);
+    copies.set(file.pkgPathReal, file.pkgVersion);
+    for (const parentPath of file.parents) {
+      const parentFile = tracedFiles[parentPath];
+      if (!parentFile || parentFile.pkgName === file.pkgName) continue;
+      if (!deps.has(parentFile.pkgPathReal)) deps.set(parentFile.pkgPathReal, new Map());
+      deps.get(parentFile.pkgPathReal)!.set(file.pkgName, file.pkgPathReal);
+    }
+  }
+
+  const extraCopies = new Map<string, number>(); // name@version -> extra copies so far
+  // Splitting a copy can split the copies that load it, so repeat until nothing splits
+  let split = true;
+  while (split) {
+    split = false;
+    const next = new Map<string, string>();
+    // name@copy -> its parts, each with the dependency copies its folders load
+    const parts = new Map<string, Array<{ copy: string; loads: Map<string, string> }>>();
+    for (const [folder, copy] of copies) {
+      const { pkgName, pkgVersion } = packages.get(folder)!;
+      const loads = [...(deps.get(folder) ?? [])].map(
+        ([name, dep]) => [name, copies.get(dep)!] as const
+      );
+      const group = parts.get(`${pkgName}@${copy}`) ?? [];
+      parts.set(`${pkgName}@${copy}`, group);
+      let part = group.find(p => loads.every(([name, dep]) => (p.loads.get(name) ?? dep) === dep));
+      if (!part) {
+        // The first part keeps the copy; each extra one gets the next free `<version>_<n>`
+        const n = group.length ? (extraCopies.get(`${pkgName}@${pkgVersion}`) ?? 0) + 1 : 0;
+        if (n) extraCopies.set(`${pkgName}@${pkgVersion}`, n);
+        part = { copy: n ? `${pkgVersion}_${n}` : copy, loads: new Map() };
+        group.push(part);
+        split ||= n > 0;
+      }
+      for (const [name, dep] of loads) part.loads.set(name, dep);
+      next.set(folder, part.copy);
+    }
+    copies = next;
+  }
+  return copies;
 }
 
 /**
@@ -452,7 +505,8 @@ async function copyPackageVersion(
  */
 async function createDependencySymlinks(
   tracedFiles: Record<string, TracedFile>,
-  multiVersionPackages: Record<string, Record<string, string[]>>, // Pkgs with >1 version traced
+  copies: Map<string, string>, // pkgPathReal -> output copy
+  multiVersionPackages: Record<string, Record<string, string[]>>, // Pkgs with >1 copy traced
   { nodeModulesPath, versionsPath }: { nodeModulesPath: string; versionsPath: string }
 ): Promise<void> {
   // Use a Map to store symlink tasks (target -> source), automatically handling duplicates
@@ -475,7 +529,7 @@ async function createDependencySymlinks(
       ) {
         // Determine the output directory of the *parent* package
         const parentPackageOutputDir = multiVersionPackages[parentFile.pkgName]
-          ? path.join(versionsPath, `${parentFile.pkgName}@${parentFile.pkgVersion}`) // Parent is also multi-version
+          ? path.join(versionsPath, `${parentFile.pkgName}@${copies.get(parentFile.pkgPathReal)}`) // Parent is also multi-version
           : path.join(nodeModulesPath, parentFile.pkgName); // Parent is single-version
 
         // The symlink target is inside the parent's node_modules directory
@@ -484,7 +538,7 @@ async function createDependencySymlinks(
 
         // The symlink source points to the specific version of the dependency required
         // e.g., ../../.versions/dependency@2.0.0 (relative path is calculated later)
-        const source = path.join(versionsPath, `${file.pkgName}@${file.pkgVersion}`);
+        const source = path.join(versionsPath, `${file.pkgName}@${copies.get(file.pkgPathReal)}`);
 
         // Add task to map (overwrites if target already exists, ensuring one link per target)
         symlinkTasks.set(target, source);
@@ -684,12 +738,12 @@ async function readContainingPkgJson(
   return { root, pkgJson };
 }
 
-/** Returns one sample `TracedFile` per unique `pkgName@pkgVersion` in the trace map. */
+/** Returns one sample `TracedFile` per traced package folder in the trace map. */
 function uniquePackages(tracedFiles: Record<string, TracedFile>): TracedFile[] {
   const seen = new Set<string>();
   const samples: TracedFile[] = [];
   for (const file of Object.values(tracedFiles)) {
-    const key = `${file.pkgName}@${file.pkgVersion}`;
+    const key = file.pkgPathReal;
     if (seen.has(key)) continue;
     seen.add(key);
     samples.push(file);

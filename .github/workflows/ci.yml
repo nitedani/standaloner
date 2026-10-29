@@ -38,3 +38,7 @@ jobs:
       - name: Run asset detection test
         working-directory: test/assets
         run: node test.js
+
+      - name: Run peer variants test
+        working-directory: test/peers
+        run: node test.js
