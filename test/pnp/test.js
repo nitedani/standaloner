@@ -27,8 +27,16 @@ try {
   fs.writeFileSync(path.join(tmpDir, 'yarn.lock'), '');
 
   console.log('Installing dependencies (lodash, esbuild, dual, local standaloner)...');
-  execSync(
-    `corepack yarn add lodash esbuild dual@${fileDep(path.join(__dirname, 'dual'))} standaloner@${fileDep(path.resolve(__dirname, '../../standaloner'))}`,
+  execFileSync(
+    'corepack',
+    [
+      'yarn',
+      'add',
+      'lodash',
+      'esbuild',
+      `dual@${fileDep(path.join(__dirname, 'dual'))}`,
+      `standaloner@${fileDep(path.resolve(__dirname, '../../standaloner'))}`,
+    ],
     { stdio: 'inherit', cwd: tmpDir }
   );
 
