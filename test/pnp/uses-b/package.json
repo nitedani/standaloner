@@ -1,0 +1,8 @@
+{
+  "name": "uses-b",
+  "version": "1.0.0",
+  "main": "index.cjs",
+  "dependencies": {
+    "utils": "portal:../utils-b"
+  }
+}

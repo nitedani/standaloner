@@ -1,7 +1,7 @@
 import path from 'node:path';
 import Module from 'node:module';
 import fs from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { platform } from 'node:os';
 import { nodeFileTrace, resolve as nftDefaultResolve, type NodeFileTraceResult } from '@vercel/nft';
 import { assert, toPosixPath } from './utils/utils.js';
@@ -188,9 +188,14 @@ async function pnpResolve(
   if (!inNodeModules && !pkgJson) return undefined;
   // An npm: alias sits in the folder of the package it installs, under that package's name. A
   // workspace, portal: or link: package has no node_modules folder above it: it is copied under
-  // the first name it is imported by, as node_modules names its folder. Other names link to it
-  if (!inNodeModules && !dirNames.has(pkgDir)) dirNames.set(pkgDir, pkgName);
-  const name = inNodeModules ? dirName : dirNames.get(pkgDir)!;
+  // the first name it is imported by that no other such folder took, as node_modules names its
+  // folder. Other names link to it
+  const realDir = inNodeModules ? pkgDir : realpathSync(pkgDir);
+  if (!inNodeModules && !dirNames.has(realDir)) {
+    const taken = [...dirNames.values()].includes(pkgName);
+    dirNames.set(realDir, taken ? pkgJson?.name || pkgName : pkgName);
+  }
+  const name = inNodeModules ? dirName : dirNames.get(realDir)!;
   if (name !== pkgName) {
     const version = pkgJson?.version || DEFAULT_VERSION;
     aliases.set(`${parent}\0${pkgName}`, { parent, alias: pkgName, name, version });
