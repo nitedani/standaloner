@@ -144,21 +144,25 @@ await checkTree(
   '[["xz2",2],["xz1",1],"xz1"]'
 );
 
-// With bundle: false the app's other files ship beside its entry, so they resolve through the top level
+// With bundle: false the app's other files ship beside its entry, so they resolve through the top
+// level; the package around the app is a dependency like any other
 const appDir = writeTree({
+  'pnpm-workspace.yaml': 'packages: [src]',
+  'package.json': JSON.stringify({ name: 'outer', version: '1.0.0', main: 'root.cjs' }),
+  'root.cjs': "module.exports = require('dep');",
   'src/package.json': JSON.stringify({ name: 'app', private: true }),
-  'src/index.cjs': "console.log(JSON.stringify([require('./helper.cjs'), require('consumer')]));",
+  'src/index.cjs': "console.log(JSON.stringify([require('./helper.cjs'), require('outer')]));",
   'src/helper.cjs': "module.exports = require('dep');",
   ...Object.fromEntries(
     [
+      ['node_modules/dep', pkg('dep', 2, "'new'")],
       ['src/node_modules/dep', pkg('dep', 1, "'old'")],
-      ['src/node_modules/consumer', pkg('consumer', 1, "require('dep')")],
-      ['src/node_modules/consumer/node_modules/dep', pkg('dep', 2, "'new'")],
     ].flatMap(([dir, pkgFiles]) =>
       Object.entries(pkgFiles).map(([file, content]) => [`${dir}/${file}`, content])
     )
   ),
 });
+fs.symlinkSync('../..', path.join(appDir, 'src/node_modules/outer'));
 await standaloner({
   input: path.join(appDir, 'src/index.cjs'),
   outDir: path.join(appDir, 'out'),

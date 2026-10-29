@@ -329,15 +329,16 @@ async function processTracedFiles(
   }
 
   // The app's own files: the entry files, and the other files of the package they sit in
-  const appPackages = new Set<string>();
-  for (const file of Object.values(tracedFiles)) {
-    const inPackage = (entry: string) => {
-      const relative = path.relative(file.pkgPathReal, entry);
-      return !relative.startsWith('..') && !path.isAbsolute(relative);
-    };
-    if (file.parents.some(parent => !tracedFiles[parent] && inPackage(parent)))
-      appPackages.add(file.pkgPathReal);
-  }
+  const entries = new Set(
+    Object.values(tracedFiles).flatMap(file => file.parents.filter(parent => !tracedFiles[parent]))
+  );
+  const appPackages = new Set(
+    await Promise.all(
+      [...entries].map(async entry =>
+        searchForPackageRoot(path.dirname(await fs.realpath(entry).catch(() => entry)))
+      )
+    )
+  );
   const isAppFile = (file: string) =>
     !tracedFiles[file] || appPackages.has(tracedFiles[file]!.pkgPathReal);
 
