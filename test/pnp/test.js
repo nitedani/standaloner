@@ -26,23 +26,24 @@ try {
   );
   fs.writeFileSync(path.join(tmpDir, 'yarn.lock'), '');
 
-  console.log('Installing dependencies (lodash, dual, local standaloner)...');
+  console.log('Installing dependencies (lodash, esbuild, dual, local standaloner)...');
   execSync(
-    `corepack yarn add lodash dual@${fileDep(path.join(__dirname, 'dual'))} standaloner@${fileDep(path.resolve(__dirname, '../../standaloner'))}`,
+    `corepack yarn add lodash esbuild dual@${fileDep(path.join(__dirname, 'dual'))} standaloner@${fileDep(path.resolve(__dirname, '../../standaloner'))}`,
     { stdio: 'inherit', cwd: tmpDir }
   );
 
   fs.writeFileSync(
     path.join(tmpDir, 'index.js'),
     `import _ from 'lodash';
+import { transformSync } from 'esbuild';
 import { format } from 'dual';
-console.log(format(_.defaults({ a: 1 }, { a: 3, b: 2 })));
+console.log(format(_.defaults({ a: 1 }, { a: 3, b: 2 })), transformSync('let a = 1').code.trim());
 `
   );
   fs.writeFileSync(
     path.join(tmpDir, 'build.js'),
     `import standaloner from 'standaloner';
-await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lodash', 'dual'] } });
+await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lodash', 'esbuild', 'dual'] } });
 `
   );
 
@@ -55,10 +56,13 @@ await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lod
   }).toString();
   console.log('Output:', output.trim());
 
-  if (output.trim() !== 'esm {"a":1,"b":2}') {
-    throw new Error(`Expected 'esm {"a":1,"b":2}', got '${output.trim()}'`);
+  const expected = 'esm {"a":1,"b":2} let a = 1;';
+  if (output.trim() !== expected) {
+    throw new Error(`Expected '${expected}', got '${output.trim()}'`);
   }
-  console.log('✓ Externals traced from Yarn PnP, with the ESM build of a dual package');
+  console.log(
+    "✓ Externals traced from Yarn PnP, with the ESM build of a dual package and esbuild's platform binary"
+  );
 } finally {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 }
