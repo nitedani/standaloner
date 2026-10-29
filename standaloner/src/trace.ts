@@ -188,12 +188,14 @@ async function pnpResolve(
   if (!inNodeModules && !pkgJson) return undefined;
   // An npm: alias sits in the folder of the package it installs, under that package's name. A
   // workspace, portal: or link: package has no node_modules folder above it: it is copied under
-  // the first name it is imported by that no other such folder took, as node_modules names its
-  // folder. Other names link to it
+  // the first name it is imported by, as node_modules names its folder, made unique when another
+  // such folder took it. Other names link to it
   const realDir = inNodeModules ? pkgDir : realpathSync(pkgDir);
   if (!inNodeModules && !dirNames.has(realDir)) {
-    const taken = [...dirNames.values()].includes(pkgName);
-    dirNames.set(realDir, taken ? pkgJson?.name || pkgName : pkgName);
+    const taken = new Set(dirNames.values());
+    let name = pkgName;
+    for (let i = 2; taken.has(name); i++) name = `${pkgName}~${i}`;
+    dirNames.set(realDir, name);
   }
   const name = inNodeModules ? dirName : dirNames.get(realDir)!;
   if (name !== pkgName) {
