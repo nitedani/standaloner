@@ -26,13 +26,14 @@ try {
   );
   fs.writeFileSync(path.join(tmpDir, 'yarn.lock'), '');
 
-  console.log('Installing dependencies (lodash, esbuild, dual, linked, local standaloner)...');
+  console.log('Installing dependencies (lodash4, esbuild, dual, linked, local standaloner)...');
   execFileSync(
     'corepack',
     [
       'yarn',
       'add',
-      'lodash',
+      // an npm: alias, which PnP keeps under the name of the package it installs
+      'lodash4@npm:lodash@^4.17.21',
       'esbuild',
       `dual@${fileDep(path.join(__dirname, 'dual'))}`,
       // portal: keeps the package outside any node_modules folder, as for a workspace
@@ -44,7 +45,7 @@ try {
 
   fs.writeFileSync(
     path.join(tmpDir, 'index.js'),
-    `import _ from 'lodash';
+    `import _ from 'lodash4';
 import { transformSync } from 'esbuild';
 import { format } from 'dual';
 import { linked } from 'linked';
@@ -54,7 +55,7 @@ console.log(format(_.defaults({ a: 1 }, { a: 3, b: 2 })), transformSync('let a =
   fs.writeFileSync(
     path.join(tmpDir, 'build.js'),
     `import standaloner from 'standaloner';
-await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lodash', 'esbuild', 'dual', 'linked'] } });
+await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lodash4', 'esbuild', 'dual', 'linked'] } });
 `
   );
 
@@ -72,7 +73,7 @@ await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lod
     throw new Error(`Expected '${expected}', got '${output.trim()}'`);
   }
   console.log(
-    "✓ Externals traced from Yarn PnP: the ESM build of dual and portal: packages, esbuild's platform binary"
+    "✓ Externals traced from Yarn PnP: an npm: alias, the ESM build of dual and portal: packages, esbuild's platform binary"
   );
 } finally {
   fs.rmSync(tmpDir, { recursive: true, force: true });
