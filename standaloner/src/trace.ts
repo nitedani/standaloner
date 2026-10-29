@@ -347,10 +347,9 @@ async function processTracedFiles(
       multiVersionPackages[name] = versions;
       // Add package name to build summary instead of logging
       buildSummary.addPackageName(name);
-      // Sort versions newest first, a version's `<version>` copy before its `<version>_<n>` ones
+      // Sort versions newest first, then by name, so `<version>` comes before `<version>_<n>`
       const sortedVersions = versionEntries.sort(
-        ([v1], [v2]) =>
-          compareVersions(v1, v2) || Number(v1.includes('_')) - Number(v2.includes('_'))
+        ([v1], [v2]) => compareVersions(v1, v2) || (v1 < v2 ? -1 : 1)
       );
 
       // Copy each version into the dedicated .versions directory
