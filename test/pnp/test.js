@@ -26,7 +26,7 @@ try {
   );
   fs.writeFileSync(path.join(tmpDir, 'yarn.lock'), '');
 
-  console.log('Installing dependencies (lodash4, esbuild, dual, cjs-parent, linked, linked-renamed, dual-fork, uses-a, uses-b, alias-v3, alias-v4, local standaloner)...');
+  console.log('Installing dependencies (lodash4, esbuild, dual, cjs-parent, linked, linked-renamed, dual-fork, fork-user, uses-a, uses-b, alias-v3, alias-v4, local standaloner)...');
   execFileSync(
     'corepack',
     [
@@ -45,6 +45,8 @@ try {
       `linked@portal:${path.join(__dirname, 'linked').replace(/\\/g, '/')}`,
       // its package.json says it is dual 1.0.0, like the real dual
       `dual-fork@portal:${path.join(__dirname, 'dual-fork').replace(/\\/g, '/')}`,
+      // requires dual-local, a local dual 1.0.0, as dual
+      `fork-user@portal:${path.join(__dirname, 'fork-user').replace(/\\/g, '/')}`,
       // each requires a different portal: package as utils
       `uses-a@portal:${path.join(__dirname, 'uses-a').replace(/\\/g, '/')}`,
       `uses-b@portal:${path.join(__dirname, 'uses-b').replace(/\\/g, '/')}`,
@@ -64,17 +66,18 @@ import cjsParent from 'cjs-parent';
 import { linked } from 'linked';
 import { linked as renamed } from 'linked-renamed';
 import fork from 'dual-fork';
+import forkUser from 'fork-user';
 import usesA from 'uses-a';
 import usesB from 'uses-b';
 import v3 from 'alias-v3';
 import v4 from 'alias-v4';
-console.log(format(_.defaults({ a: 1 }, { a: 3, b: 2 })), transformSync('let a = 1').code.trim(), cjsParent, linked, renamed, fork, usesA + usesB, v3, v4);
+console.log(format(_.defaults({ a: 1 }, { a: 3, b: 2 })), transformSync('let a = 1').code.trim(), cjsParent, linked, renamed, fork, forkUser, usesA + usesB, v3, v4);
 `
   );
   fs.writeFileSync(
     path.join(tmpDir, 'build.js'),
     `import standaloner from 'standaloner';
-await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lodash4', 'esbuild', 'dual', 'cjs-parent', 'linked', 'linked-renamed', 'dual-fork', 'uses-a', 'uses-b', 'alias-v3', 'alias-v4'] } });
+await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lodash4', 'esbuild', 'dual', 'cjs-parent', 'linked', 'linked-renamed', 'dual-fork', 'fork-user', 'uses-a', 'uses-b', 'alias-v3', 'alias-v4'] } });
 `
   );
 
@@ -87,7 +90,7 @@ await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lod
   }).toString();
   console.log('Output:', output.trim());
 
-  const expected = 'esm {"a":1,"b":2} let a = 1; cjs "cjs-parent" linked esm linked esm fork AB 3.10.1 4.17.21';
+  const expected = 'esm {"a":1,"b":2} let a = 1; cjs "cjs-parent" linked esm linked esm fork local "fork-user" AB 3.10.1 4.17.21';
   if (output.trim() !== expected) {
     throw new Error(`Expected '${expected}', got '${output.trim()}'`);
   }

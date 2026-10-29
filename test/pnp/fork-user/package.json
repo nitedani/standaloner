@@ -1,0 +1,8 @@
+{
+  "name": "fork-user",
+  "version": "1.0.0",
+  "main": "index.cjs",
+  "dependencies": {
+    "dual": "portal:../dual-local"
+  }
+}

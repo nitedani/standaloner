@@ -162,7 +162,11 @@ function pnpPackageDir(pkgName: string, issuer: string): string | undefined {
 }
 
 /** npm: aliases found under PnP, per importing file: the name and version of the package each installs. */
-type PnpAliases = Map<string, { parent: string; alias: string; name: string; version: string }>;
+type PnpAliases = Map<
+  string,
+  { parent: string; alias: string; name: string; version: string; local: boolean }
+>;
+const LOCAL_VERSION_SUFFIX = '-local';
 
 /**
  * Under Yarn PnP there is no node_modules tree for nft to walk: ask PnP for the package's
@@ -200,7 +204,8 @@ async function pnpResolve(
   const name = inNodeModules ? dirName : dirNames.get(realDir)!;
   if (name !== pkgName) {
     const version = pkgJson?.version || DEFAULT_VERSION;
-    aliases.set(`${parent}\0${pkgName}`, { parent, alias: pkgName, name, version });
+    const local = !inNodeModules;
+    aliases.set(`${parent}\0${pkgName}`, { parent, alias: pkgName, name, version, local });
   }
   if (inNodeModules) {
     const issuer = path.join(pkgDir.slice(0, nodeModulesDir), 'index.js');
@@ -395,6 +400,22 @@ async function processTracedFiles(
     pnpAliases,
   }: { nodeModulesPath: string; versionsPath: string; pnpAliases: PnpAliases }
 ): Promise<void> {
+  // Under PnP a workspace or portal: folder can have the name and version of an npm package (a
+  // fork that kept both): it gets a version of its own, so each importer keeps its copy
+  const isLocal = (file: TracedFile) =>
+    !file.pkgPathReal.includes(`${path.sep}node_modules${path.sep}`);
+  if (process.versions.pnp) {
+    const files = Object.values(tracedFiles);
+    const npmKeys = new Set(
+      files.filter(f => !isLocal(f)).map(f => `${f.pkgName}@${f.pkgVersion}`)
+    );
+    for (const file of files) {
+      if (isLocal(file) && npmKeys.has(`${file.pkgName}@${file.pkgVersion}`)) {
+        file.pkgVersion += LOCAL_VERSION_SUFFIX;
+      }
+    }
+  }
+
   // Group files by package name and version for easier processing
   const packageRegistry: Record<string, Record<string, string[]>> = {}; // { [pkgName]: { [version]: [filePath, ...] } }
   for (const file of Object.values(tracedFiles)) {
@@ -425,7 +446,16 @@ async function processTracedFiles(
       // Add package name to build summary instead of logging
       buildSummary.addPackageName(name);
       // Sort versions newest first to easily identify the latest
-      const sortedVersions = versionEntries.sort(([v1], [v2]) => compareVersions(v1, v2));
+      // Between an npm package and its local fork, the top level gets the one the app imports
+      const importedByApp = (files: string[]) =>
+        Number(files.some(f => tracedFiles[f]!.parents.some(p => !tracedFiles[p])));
+      const sortedVersions = versionEntries.sort(
+        ([v1, f1], [v2, f2]) =>
+          compareVersions(v1, v2) ||
+          (v1.endsWith(LOCAL_VERSION_SUFFIX) || v2.endsWith(LOCAL_VERSION_SUFFIX)
+            ? importedByApp(f2) - importedByApp(f1)
+            : 0)
+      );
 
       // Copy each version into the dedicated .versions directory
       for (const [version, files] of sortedVersions) {
@@ -462,7 +492,9 @@ async function processTracedFiles(
     multiVersionPackages[name]
       ? path.join(versionsPath, `${name}@${version}`)
       : path.join(nodeModulesPath, name);
-  for (const { parent, alias, name, version } of pnpAliases.values()) {
+  for (const { parent, alias, name, version: pkgVersion, local } of pnpAliases.values()) {
+    const localVersion = pkgVersion + LOCAL_VERSION_SUFFIX;
+    const version = local && packageRegistry[name]?.[localVersion] ? localVersion : pkgVersion;
     if (!packageRegistry[name]?.[version]) continue;
     const importer = tracedFiles[parent];
     if (!importer && packageRegistry[alias]) continue;
