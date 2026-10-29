@@ -48,8 +48,8 @@ try {
       // each requires a different portal: package as utils
       `uses-a@portal:${path.join(__dirname, 'uses-a').replace(/\\/g, '/')}`,
       `uses-b@portal:${path.join(__dirname, 'uses-b').replace(/\\/g, '/')}`,
-      // the same package, imported under another name
-      `linked-renamed@portal:${path.join(__dirname, 'linked').replace(/\\/g, '/')}`,
+      // the same package, imported under another name through a symlinked folder
+      `linked-renamed@portal:${path.join(__dirname, 'linked-symlink').replace(/\\/g, '/')}`,
       `standaloner@${fileDep(path.resolve(__dirname, '../../standaloner'))}`,
     ],
     { stdio: 'inherit', cwd: tmpDir }
