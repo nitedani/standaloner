@@ -466,16 +466,10 @@ async function processTracedFiles(
       // Add package name to build summary instead of logging
       buildSummary.addPackageName(name);
       // Sort versions newest first to easily identify the latest
-      // Between an npm package and its local fork, the top level gets the fork only when the
-      // app imports it under this name
-      const appImportsFork = [...pnpAliases.values()].some(
-        a => a.dir && a.alias === name && a.name === name && !tracedFiles[a.parent]
-      );
-      const isFork = (version: string) => version.endsWith(LOCAL_VERSION_SUFFIX);
+      // A local fork sorts after the npm package of its version
+      const isFork = (version: string) => Number(version.endsWith(LOCAL_VERSION_SUFFIX));
       const sortedVersions = versionEntries.sort(
-        ([v1], [v2]) =>
-          compareVersions(v1, v2) ||
-          (isFork(v1) === isFork(v2) ? 0 : isFork(v1) === appImportsFork ? -1 : 1)
+        ([v1], [v2]) => compareVersions(v1, v2) || isFork(v1) - isFork(v2)
       );
 
       // Copy each version into the dedicated .versions directory
@@ -484,8 +478,14 @@ async function processTracedFiles(
         copyTasks.push(copyPackageVersion(files, destDir, tracedFiles));
       }
 
-      // Prepare to symlink the newest version (first after sort) to the main node_modules output
-      const [newestVersionStr] = sortedVersions[0]!;
+      // Prepare to symlink the newest version (first after sort) to the main node_modules output,
+      // or under PnP the workspace or portal: folder the app imports under this name
+      const appImport = [...pnpAliases.values()].find(
+        a => a.dir && a.alias === name && a.name === name && !tracedFiles[a.parent]
+      );
+      const appVersion = appImport && [appImport.version + LOCAL_VERSION_SUFFIX, appImport.version];
+      const newestVersionStr =
+        appVersion?.find(version => versions[version]) ?? sortedVersions[0]![0];
       topLevelSymlinkTasks.push({
         source: path.join(versionsPath, `${name}@${newestVersionStr}`), // Source is in .versions
         target: path.join(nodeModulesPath, name), // Target is in top-level node_modules

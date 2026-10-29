@@ -26,7 +26,7 @@ try {
   );
   fs.writeFileSync(path.join(tmpDir, 'yarn.lock'), '');
 
-  console.log('Installing dependencies (lodash4, esbuild, dual, cjs-parent, linked, linked-renamed, dual-fork, fork-user, uses-a, uses-b, alias-v3, alias-v4, local standaloner)...');
+  console.log('Installing dependencies (lodash4, lodash, esbuild, dual, cjs-parent, linked, linked-renamed, dual-fork, fork-user, uses-a, uses-b, alias-v3, alias-v4, local standaloner)...');
   execFileSync(
     'corepack',
     [
@@ -34,6 +34,8 @@ try {
       'add',
       // an npm: alias, which PnP keeps under the name of the package it installs
       'lodash4@npm:lodash@^4.17.21',
+      // a local lodash 3.10.1, next to the npm lodash 3.10.1 alias-v3 requires
+      `lodash@portal:${path.join(__dirname, 'lodash-fork').replace(/\\/g, '/')}`,
       'esbuild',
       `dual@${fileDep(path.join(__dirname, 'dual'))}`,
       // requires dual, so its require export is traced
@@ -60,6 +62,7 @@ try {
   fs.writeFileSync(
     path.join(tmpDir, 'index.js'),
     `import _ from 'lodash4';
+import lodashFork from 'lodash';
 import { transformSync } from 'esbuild';
 import { format } from 'dual';
 import cjsParent from 'cjs-parent';
@@ -71,13 +74,13 @@ import usesA from 'uses-a';
 import usesB from 'uses-b';
 import v3 from 'alias-v3';
 import v4 from 'alias-v4';
-console.log(format(_.defaults({ a: 1 }, { a: 3, b: 2 })), transformSync('let a = 1').code.trim(), cjsParent, linked, renamed, fork, forkUser, usesA + usesB, v3, v4);
+console.log(format(_.defaults({ a: 1 }, { a: 3, b: 2 })), transformSync('let a = 1').code.trim(), cjsParent, lodashFork.VERSION, linked, renamed, fork, forkUser, usesA + usesB, v3, v4);
 `
   );
   fs.writeFileSync(
     path.join(tmpDir, 'build.js'),
     `import standaloner from 'standaloner';
-await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lodash4', 'esbuild', 'dual', 'cjs-parent', 'linked', 'linked-renamed', 'dual-fork', 'fork-user', 'uses-a', 'uses-b', 'alias-v3', 'alias-v4'] } });
+await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lodash4', 'lodash', 'esbuild', 'dual', 'cjs-parent', 'linked', 'linked-renamed', 'dual-fork', 'fork-user', 'uses-a', 'uses-b', 'alias-v3', 'alias-v4'] } });
 `
   );
 
@@ -90,7 +93,7 @@ await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lod
   }).toString();
   console.log('Output:', output.trim());
 
-  const expected = 'esm {"a":1,"b":2} let a = 1; cjs "cjs-parent" linked esm linked esm fork local "fork-user" AB 3.10.1 4.17.21';
+  const expected = 'esm {"a":1,"b":2} let a = 1; cjs "cjs-parent" lodash-fork linked esm linked esm fork local "fork-user" AB 3.10.1 4.17.21';
   if (output.trim() !== expected) {
     throw new Error(`Expected '${expected}', got '${output.trim()}'`);
   }
