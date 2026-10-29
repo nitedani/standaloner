@@ -219,7 +219,8 @@ async function pnpResolve(
 /**
  * Names each workspace or portal: folder in the output as node_modules would: a name the app
  * imports it under, else its package.json name when it is imported by it, else its first import
- * name, made unique when another folder took it. Its other import names link to it.
+ * name, made unique when another folder or an app's npm: alias took it. Its other import names
+ * link to it.
  */
 function nameLocalFolders(aliases: PnpAliases, dirNames: Map<string, string>): void {
   const imports = new Map<string, { names: Set<string>; appNames: Set<string>; ownName?: string }>();
@@ -233,10 +234,13 @@ function nameLocalFolders(aliases: PnpAliases, dirNames: Map<string, string>): v
   const isAppFile = (file: string) =>
     !file.includes(`${path.sep}node_modules${path.sep}`) &&
     !localDirs.some(dir => file.startsWith(dir + path.sep));
-  for (const { dir, local, alias, parent } of aliases.values()) {
-    if (local && isAppFile(realpathSync(parent))) imports.get(dir)!.appNames.add(alias);
-  }
+  // The names the app imports npm: aliases under link to them, so no folder takes them
   const taken = new Set<string>();
+  for (const { dir, local, alias, name, parent } of aliases.values()) {
+    if (!isAppFile(realpathSync(parent))) continue;
+    if (local) imports.get(dir)!.appNames.add(alias);
+    else if (alias !== name) taken.add(alias);
+  }
   const sorted = [...imports].sort(
     ([a, { appNames: appA }], [b, { appNames: appB }]) =>
       Number(appB.size > 0) - Number(appA.size > 0) || (a < b ? -1 : 1)

@@ -1,0 +1,8 @@
+{
+  "name": "uses-lodash4",
+  "version": "1.0.0",
+  "main": "index.cjs",
+  "dependencies": {
+    "lodash4": "portal:../lodash4-local"
+  }
+}
