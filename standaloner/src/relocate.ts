@@ -38,7 +38,7 @@ const safeRequireResolve = (
       if (cleanedImporter.startsWith('\0')) cleanedImporter = cleanedImporter.slice(1);
       cleanedImporter = cleanedImporter.replace(/[?#].*$/, '');
       if (path.isAbsolute(cleanedImporter)) {
-        // require.resolve applies `require` exports: under PnP an import gets Yarn's own answer
+        // require.resolve applies `require` exports: under PnP an import asks Yarn for `import`
         const pnp = esm && process.versions.pnp ? findPnpApi?.(cleanedImporter) : undefined;
         const resolved = pnp?.resolveRequest(request, cleanedImporter, {
           conditions: new Set(['node', 'import']),
