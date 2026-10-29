@@ -165,8 +165,8 @@ function pnpPackageDir(pkgName: string, issuer: string): string | undefined {
  * Under Yarn PnP there is no node_modules tree for nft to walk: ask PnP for the package's
  * folder and let nft's own resolver apply `exports` from a file next to it.
  */
-/** npm: aliases found under PnP: alias name -> the name and version of the package it installs. */
-type PnpAliases = Map<string, { name: string; version: string }>;
+/** npm: aliases found under PnP, per importing file: the name and version of the package each installs. */
+type PnpAliases = Map<string, { parent: string; alias: string; name: string; version: string }>;
 
 async function pnpResolve(
   id: string,
@@ -184,7 +184,7 @@ async function pnpResolve(
     // An npm: alias sits in the folder of the package it installs, under that package's name
     if (dirName !== pkgName) {
       const version = (await readPkgJson(pkgDir))?.version || DEFAULT_VERSION;
-      aliases.set(pkgName, { name: dirName, version });
+      aliases.set(`${parent}\0${pkgName}`, { parent, alias: pkgName, name: dirName, version });
     }
     const issuer = path.join(pkgDir.slice(0, nodeModulesDir), 'index.js');
     return nftDefaultResolve(dirName + id.slice(pkgName.length), issuer, job, cjsResolve);
@@ -439,13 +439,19 @@ async function processTracedFiles(
   await Promise.all(topLevelSymlinkTasks.map(task => createSymlink(task.source, task.target)));
 
   // Under PnP an npm: alias was traced under the name of the package it installs: link it
-  for (const [alias, { name, version }] of pnpAliases) {
-    const versions = packageRegistry[name];
-    if (packageRegistry[alias] || !versions?.[version]) continue;
-    const source = multiVersionPackages[name]
+  // where its importer looks it up
+  const outputDir = (name: string, version: string) =>
+    multiVersionPackages[name]
       ? path.join(versionsPath, `${name}@${version}`)
       : path.join(nodeModulesPath, name);
-    await createSymlink(source, path.join(nodeModulesPath, alias));
+  for (const { parent, alias, name, version } of pnpAliases.values()) {
+    if (!packageRegistry[name]?.[version]) continue;
+    const importer = tracedFiles[parent];
+    if (!importer && packageRegistry[alias]) continue;
+    const target = importer
+      ? path.join(outputDir(importer.pkgName, importer.pkgVersion), 'node_modules', alias)
+      : path.join(nodeModulesPath, alias);
+    await createSymlink(outputDir(name, version), target);
   }
 }
 
