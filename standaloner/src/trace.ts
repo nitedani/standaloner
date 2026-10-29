@@ -328,15 +328,20 @@ async function processTracedFiles(
     packageRegistry[file.pkgName]![copy]!.push(file.path);
   }
 
-  // The app's own files: the entry files, and the other files of the package they sit in
+  // The app's own files: the entry files, and the other files of the package they sit in,
+  // found as processSingleFile finds a traced file's package
   const entries = new Set(
     Object.values(tracedFiles).flatMap(file => file.parents.filter(parent => !tracedFiles[parent]))
   );
   const appPackages = new Set(
     await Promise.all(
-      [...entries].map(async entry =>
-        searchForPackageRoot(path.dirname(await fs.realpath(entry).catch(() => entry)))
-      )
+      [...entries].map(async entry => {
+        const match = NODE_MODULES_RE.exec(toPosixPath(entry));
+        if (!match)
+          return searchForPackageRoot(path.dirname(await fs.realpath(entry).catch(() => entry)));
+        const root = path.join(match[1]!, match[2]!);
+        return fs.realpath(root).catch(() => root);
+      })
     )
   );
   const isAppFile = (file: string) =>

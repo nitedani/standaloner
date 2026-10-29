@@ -145,40 +145,58 @@ await checkTree(
 );
 
 // With bundle: false the app's other files ship beside its entry, so they resolve through the top
-// level; the package around the app is a dependency like any other
-const appDir = writeTree({
-  'pnpm-workspace.yaml': 'packages: [src]',
-  'package.json': JSON.stringify({ name: 'outer', version: '1.0.0', main: 'root.cjs' }),
-  'root.cjs': "module.exports = require('dep');",
+// level; the workspace package around the app is a dependency like any other
+const checkApp = async (title, app, entryDir, appFiles) => {
+  const appDir = writeTree({
+    'pnpm-workspace.yaml': 'packages: []',
+    'package.json': JSON.stringify({ name: 'outer', version: '1.0.0', main: 'root.cjs' }),
+    'root.cjs': "module.exports = require('dep');",
+    [`${entryDir}/index.cjs`]:
+      "console.log(JSON.stringify([require('./helper.cjs'), require('outer')]));",
+    [`${entryDir}/helper.cjs`]: "module.exports = require('dep');",
+    ...appFiles,
+    ...Object.fromEntries(
+      [
+        ['node_modules/dep', pkg('dep', 2, "'new'")],
+        [`${app}/node_modules/dep`, pkg('dep', 1, "'old'")],
+      ].flatMap(([dir, pkgFiles]) =>
+        Object.entries(pkgFiles).map(([file, content]) => [`${dir}/${file}`, content])
+      )
+    ),
+  });
+  fs.symlinkSync(
+    path.relative(path.join(appDir, app, 'node_modules'), appDir),
+    path.join(appDir, app, 'node_modules/outer')
+  );
+  await standaloner({
+    input: path.join(appDir, entryDir, 'index.cjs'),
+    outDir: path.join(appDir, 'out'),
+    bundle: false,
+    verbose: false,
+  });
+  for (const file of ['index.cjs', 'helper.cjs'])
+    fs.copyFileSync(path.join(appDir, entryDir, file), path.join(appDir, 'out', file));
+  const output = execSync('node out/index.cjs', { encoding: 'utf8', cwd: appDir }).trim();
+  fs.rmSync(appDir, { recursive: true });
+  if (output !== '["old","new"]') {
+    console.error(`✗ ${title}`);
+    console.error('  Expected: ["old","new"]');
+    console.error(`  Got:      ${output}`);
+    process.exit(1);
+  }
+  console.log(`✓ ${title}\n`);
+};
+await checkApp("The app's own files load the app's copy from the top level", 'src', 'src', {
   'src/package.json': JSON.stringify({ name: 'app', private: true }),
-  'src/index.cjs': "console.log(JSON.stringify([require('./helper.cjs'), require('outer')]));",
-  'src/helper.cjs': "module.exports = require('dep');",
-  ...Object.fromEntries(
-    [
-      ['node_modules/dep', pkg('dep', 2, "'new'")],
-      ['src/node_modules/dep', pkg('dep', 1, "'old'")],
-    ].flatMap(([dir, pkgFiles]) =>
-      Object.entries(pkgFiles).map(([file, content]) => [`${dir}/${file}`, content])
-    )
-  ),
 });
-fs.symlinkSync('../..', path.join(appDir, 'src/node_modules/outer'));
-await standaloner({
-  input: path.join(appDir, 'src/index.cjs'),
-  outDir: path.join(appDir, 'out'),
-  bundle: false,
-  verbose: false,
-});
-for (const file of ['index.cjs', 'helper.cjs'])
-  fs.copyFileSync(path.join(appDir, 'src', file), path.join(appDir, 'out', file));
-const appOutput = execSync('node out/index.cjs', { encoding: 'utf8', cwd: appDir }).trim();
-fs.rmSync(appDir, { recursive: true });
-if (appOutput !== '["old","new"]') {
-  console.error("✗ The app's own files should load the app's copy from the top level");
-  console.error('  Expected: ["old","new"]');
-  console.error(`  Got:      ${appOutput}`);
-  process.exit(1);
-}
-console.log("✓ The app's own files load the app's copy from the top level\n");
+await checkApp(
+  "An installed app's files load its copy, past a package.json that only sets the type",
+  'node_modules/runner',
+  'node_modules/runner/dist',
+  {
+    'node_modules/runner/package.json': JSON.stringify({ name: 'runner', version: '1.0.0' }),
+    'node_modules/runner/dist/package.json': JSON.stringify({ type: 'commonjs' }),
+  }
+);
 
 console.log('=== All Peer Variants Tests Passed! ===');
