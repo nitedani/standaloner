@@ -400,6 +400,10 @@ function assignCopies(tracedFiles: Record<string, TracedFile>): Map<string, stri
   }
 
   const extraCopies = new Map<string, number>(); // name@version -> extra copies so far
+  // Folders that load more dependencies pick their part first, so one that loads fewer joins
+  // a matching part instead of opening one of its own
+  const loadCount = (folder: string) => deps.get(folder)?.size ?? 0;
+  const folders = [...copies.keys()].sort((a, b) => loadCount(b) - loadCount(a));
   // Splitting a copy can split the copies that load it, so repeat until nothing splits
   let split = true;
   while (split) {
@@ -407,7 +411,8 @@ function assignCopies(tracedFiles: Record<string, TracedFile>): Map<string, stri
     const next = new Map<string, string>();
     // name@copy -> its parts, each with the dependency copies its folders load
     const parts = new Map<string, Array<{ copy: string; loads: Map<string, string> }>>();
-    for (const [folder, copy] of copies) {
+    for (const folder of folders) {
+      const copy = copies.get(folder)!;
       const { pkgName, pkgVersion } = packages.get(folder)!;
       const loads = [...(deps.get(folder) ?? [])].map(
         ([name, dep]) => [name, copies.get(dep)!] as const
