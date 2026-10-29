@@ -142,10 +142,7 @@ async function trace({
   // Don't log here, the build summary will show the results
 }
 
-type PnpApi = {
-  resolveToUnqualified(request: string, issuer: string): string | null;
-  resolveRequest(request: string, issuer: string, opts: { conditions: Set<string> }): string | null;
-};
+type PnpApi = { resolveToUnqualified(request: string, issuer: string): string | null };
 const findPnpApi = (Module as { findPnpApi?: (lookupSource: string) => PnpApi | null }).findPnpApi;
 
 /** Under Yarn PnP, packages live in zip archives outside the project (Yarn's global cache by default). */
@@ -181,9 +178,14 @@ async function pnpResolve(
     const issuer = path.join(pkgDir.slice(0, -pkgSuffix.length), 'index.js');
     return nftDefaultResolve(id, issuer, job, cjsResolve);
   }
-  // A workspace, portal: or link: package has no node_modules folder above it
-  const conditions = new Set([...job.conditions, cjsResolve ? 'require' : 'import']);
-  return findPnpApi?.(parent)?.resolveRequest(id, parent, { conditions }) ?? undefined;
+  // A workspace, portal: or link: package has no node_modules folder above it: nft applies its
+  // `exports` as for the package importing itself, else resolves the path inside its folder
+  if (!existsSync(path.join(pkgDir, 'package.json'))) return undefined;
+  return nftDefaultResolve(id, path.join(pkgDir, 'index.js'), job, cjsResolve).catch(() =>
+    nftDefaultResolve(pkgDir + id.slice(pkgName.length), parent, job, cjsResolve).catch(
+      () => undefined
+    )
+  );
 }
 
 /**
