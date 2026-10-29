@@ -194,20 +194,17 @@ async function pnpResolve(
   const pkgJson = inNodeModules ? null : await readPkgJson(pkgDir);
   if (!inNodeModules && !pkgJson) return undefined;
   const key = `${parent}\0${pkgName}`;
-  if (!inNodeModules) {
-    // A workspace, portal: or link: package has no node_modules folder above it: its name in
-    // the output is chosen once every import of it is known (nameLocalFolders)
-    const dir = realpathSync(pkgDir);
-    const ownName = pkgJson?.name;
-    aliases.set(key, { parent, alias: pkgName, name: '', dir, local: true, ownName });
-  } else {
+  if (inNodeModules) {
     // An npm package's folder is named after it, an npm: alias's after the package it installs
     aliases.set(key, { parent, alias: pkgName, name: dirName, dir: pkgDir, local: false });
-  }
-  if (inNodeModules) {
     const issuer = path.join(pkgDir.slice(0, nodeModulesDir), 'index.js');
     return nftDefaultResolve(dirName + subpath, issuer, job, cjsResolve);
   }
+  // A workspace, portal: or link: package has no node_modules folder above it: its name in
+  // the output is chosen once every import of it is known (nameLocalFolders)
+  const dir = realpathSync(pkgDir);
+  const ownName = pkgJson?.name;
+  aliases.set(key, { parent, alias: pkgName, name: '', dir, local: true, ownName });
   // nft applies its `exports` as for the package importing itself, else resolves the path
   // inside its folder
   const selfIssuer = path.join(pkgDir, 'index.js');
