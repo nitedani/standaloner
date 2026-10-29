@@ -348,11 +348,7 @@ async function processTracedFiles(
       // Add package name to build summary instead of logging
       buildSummary.addPackageName(name);
       // Sort versions newest first to easily identify the latest
-      // A version's first copy, the app's own install, sorts before its `_<n>` copies
-      const sortedVersions = versionEntries.sort(
-        ([v1], [v2]) =>
-          compareVersions(v1, v2) || Number(v1.includes('_')) - Number(v2.includes('_'))
-      );
+      const sortedVersions = versionEntries.sort(([v1], [v2]) => compareVersions(v1, v2));
 
       // Copy each version into the dedicated .versions directory
       for (const [version, files] of sortedVersions) {
@@ -360,10 +356,12 @@ async function processTracedFiles(
         copyTasks.push(copyPackageVersion(files, destDir, tracedFiles));
       }
 
-      // Prepare to symlink the newest version (first after sort) to the main node_modules output
-      const [newestVersionStr] = sortedVersions[0]!;
+      // The top level links to the copy the app's own files import, else to the newest version
+      const appImports = ([, files]: [string, string[]]) =>
+        files.some(file => tracedFiles[file]!.parents.some(parent => !tracedFiles[parent]));
+      const [topLevelVersion] = sortedVersions.find(appImports) ?? sortedVersions[0]!;
       topLevelSymlinkTasks.push({
-        source: path.join(versionsPath, `${name}@${newestVersionStr}`), // Source is in .versions
+        source: path.join(versionsPath, `${name}@${topLevelVersion}`), // Source is in .versions
         target: path.join(nodeModulesPath, name), // Target is in top-level node_modules
       });
     }
@@ -391,25 +389,20 @@ async function processTracedFiles(
  */
 function assignCopies(tracedFiles: Record<string, TracedFile>): Map<string, string> {
   const deps = new Map<string, Map<string, string>>(); // pkgPathReal -> dependency name -> its pkgPathReal
-  const appImported = new Set<string>(); // pkgPathReal of packages the app's own files import
   for (const file of Object.values(tracedFiles)) {
     for (const parentPath of file.parents) {
       const parentFile = tracedFiles[parentPath];
-      if (!parentFile) appImported.add(file.pkgPathReal);
       if (!parentFile || parentFile.pkgName === file.pkgName) continue;
       if (!deps.has(parentFile.pkgPathReal)) deps.set(parentFile.pkgPathReal, new Map());
       deps.get(parentFile.pkgPathReal)!.set(file.pkgName, file.pkgPathReal);
     }
   }
-  // The app's own install takes `<version>`, which the top-level link points to. Folders that
-  // load more dependencies pick their copy first, so one that loads fewer joins a matching copy
-  // instead of opening one of its own. Paths break ties, so every build names copies alike.
+  // Folders that load more dependencies pick their copy first, so one that loads fewer joins a
+  // matching copy instead of opening one of its own. Paths break ties, so every build names
+  // copies alike.
   const loadCount = (folder: string) => deps.get(folder)?.size ?? 0;
   const folders = uniquePackages(tracedFiles).sort(
-    ({ pkgPathReal: a }, { pkgPathReal: b }) =>
-      Number(appImported.has(b)) - Number(appImported.has(a)) ||
-      loadCount(b) - loadCount(a) ||
-      a.localeCompare(b)
+    ({ pkgPathReal: a }, { pkgPathReal: b }) => loadCount(b) - loadCount(a) || a.localeCompare(b)
   );
 
   // Each pass groups every name@version anew, by the copies its dependencies got in the pass

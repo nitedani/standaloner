@@ -25,7 +25,7 @@ await standaloner({
 console.log('✓ Build completed\n');
 
 const output = execSync('node dist/index.mjs', { encoding: 'utf8', cwd: __dirname }).trim();
-const expected = 'app: peer-dep 2.0.0, peer-typed; peer-user: peer-dep 1.0.0, peer-typed';
+const expected = 'app: peer-dep 1.0.0/1.0.0, peer-typed; peer-user: peer-dep 2.0.0, peer-typed';
 if (output !== expected) {
   console.error('✗ Each install should load its own peer-dep version');
   console.error(`  Expected: ${expected}`);

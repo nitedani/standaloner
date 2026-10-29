@@ -79,17 +79,17 @@ importers:
   test/peers:
     dependencies:
       peer-dep:
-        specifier: file:./packages/dep-2
-        version: file:test/peers/packages/dep-2
+        specifier: file:./packages/dep-1
+        version: file:test/peers/packages/dep-1
       peer-typed:
         specifier: file:./packages/typed
-        version: file:test/peers/packages/typed(peer-dep@file:test/peers/packages/dep-2)
+        version: file:test/peers/packages/typed(peer-dep@file:test/peers/packages/dep-1)
       peer-user:
         specifier: file:./packages/user
         version: file:test/peers/packages/user
       peer-wrapper:
         specifier: file:./packages/wrapper
-        version: file:test/peers/packages/wrapper(peer-dep@file:test/peers/packages/dep-2)
+        version: file:test/peers/packages/wrapper(peer-dep@file:test/peers/packages/dep-1)
       standaloner:
         specifier: workspace:*
         version: link:../../standaloner
@@ -3575,9 +3575,9 @@ snapshots:
 
   peer-user@file:test/peers/packages/user:
     dependencies:
-      peer-dep: file:test/peers/packages/dep-1
-      peer-typed: file:test/peers/packages/typed(peer-dep@file:test/peers/packages/dep-1)
-      peer-wrapper: file:test/peers/packages/wrapper(peer-dep@file:test/peers/packages/dep-1)
+      peer-dep: file:test/peers/packages/dep-2
+      peer-typed: file:test/peers/packages/typed(peer-dep@file:test/peers/packages/dep-2)
+      peer-wrapper: file:test/peers/packages/wrapper(peer-dep@file:test/peers/packages/dep-2)
 
   peer-wrapper@file:test/peers/packages/wrapper(peer-dep@file:test/peers/packages/dep-1):
     dependencies:

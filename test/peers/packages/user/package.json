@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "dependencies": {
-    "peer-dep": "file:../dep-1",
+    "peer-dep": "file:../dep-2",
     "peer-typed": "file:../typed",
     "peer-wrapper": "file:../wrapper"
   }
