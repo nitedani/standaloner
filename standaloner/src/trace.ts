@@ -213,10 +213,11 @@ async function traceProjectFiles(
   // Filter out NFT internals, entry points, system files, and files already in output
   const filesToProcess = [...traceResults.fileList].filter(file => {
     const reason = traceResults.reasons.get(file);
-    // Exclude initial files, system paths outside the project, and anything already inside the target output dir
+    // Exclude initial files, system paths, and anything already inside the target output dir.
+    // Not /usr under PnP: Yarn's folders can be there, and files outside any package are skipped below.
     return !(
       reason?.type.includes('initial') ||
-      (file.startsWith('usr/') && !path.join(traceBase, file).startsWith(baseDir + path.sep)) ||
+      (!process.versions.pnp && file.startsWith('usr/')) ||
       file.startsWith(relOutDir)
     );
   });
