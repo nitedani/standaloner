@@ -161,7 +161,10 @@ function pnpPackageDir(pkgName: string, issuer: string): string | undefined {
   }
 }
 
-/** npm: aliases found under PnP, per importing file: the name and version of the package each installs. */
+/**
+ * Imports under PnP of an npm: alias or of a workspace or portal: folder, per importing file:
+ * the name and version of the package each installs.
+ */
 type PnpAliases = Map<
   string,
   { parent: string; alias: string; name: string; version: string; local: boolean }
@@ -202,9 +205,9 @@ async function pnpResolve(
     dirNames.set(realDir, name);
   }
   const name = inNodeModules ? dirName : dirNames.get(realDir)!;
-  if (name !== pkgName) {
+  const local = !inNodeModules;
+  if (name !== pkgName || local) {
     const version = pkgJson?.version || DEFAULT_VERSION;
-    const local = !inNodeModules;
     aliases.set(`${parent}\0${pkgName}`, { parent, alias: pkgName, name, version, local });
   }
   if (inNodeModules) {
@@ -446,15 +449,16 @@ async function processTracedFiles(
       // Add package name to build summary instead of logging
       buildSummary.addPackageName(name);
       // Sort versions newest first to easily identify the latest
-      // Between an npm package and its local fork, the top level gets the one the app imports
-      const importedByApp = (files: string[]) =>
-        Number(files.some(f => tracedFiles[f]!.parents.some(p => !tracedFiles[p])));
+      // Between an npm package and its local fork, the top level gets the fork only when the
+      // app imports it under this name
+      const appImportsFork = [...pnpAliases.values()].some(
+        a => a.local && a.alias === name && a.name === name && !tracedFiles[a.parent]
+      );
+      const isFork = (version: string) => version.endsWith(LOCAL_VERSION_SUFFIX);
       const sortedVersions = versionEntries.sort(
-        ([v1, f1], [v2, f2]) =>
+        ([v1], [v2]) =>
           compareVersions(v1, v2) ||
-          (v1.endsWith(LOCAL_VERSION_SUFFIX) || v2.endsWith(LOCAL_VERSION_SUFFIX)
-            ? importedByApp(f2) - importedByApp(f1)
-            : 0)
+          (isFork(v1) === isFork(v2) ? 0 : isFork(v1) === appImportsFork ? -1 : 1)
       );
 
       // Copy each version into the dedicated .versions directory
@@ -493,6 +497,7 @@ async function processTracedFiles(
       ? path.join(versionsPath, `${name}@${version}`)
       : path.join(nodeModulesPath, name);
   for (const { parent, alias, name, version: pkgVersion, local } of pnpAliases.values()) {
+    if (alias === name) continue;
     const localVersion = pkgVersion + LOCAL_VERSION_SUFFIX;
     const version = local && packageRegistry[name]?.[localVersion] ? localVersion : pkgVersion;
     if (!packageRegistry[name]?.[version]) continue;
