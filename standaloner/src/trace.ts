@@ -387,10 +387,8 @@ async function processTracedFiles(
 function assignCopies(tracedFiles: Record<string, TracedFile>): Map<string, string> {
   const packages = new Map<string, TracedFile>(); // pkgPathReal -> a file of that package
   const deps = new Map<string, Map<string, string>>(); // pkgPathReal -> dependency name -> its pkgPathReal
-  let copies = new Map<string, string>(); // pkgPathReal -> output copy
   for (const file of Object.values(tracedFiles)) {
     packages.set(file.pkgPathReal, file);
-    copies.set(file.pkgPathReal, file.pkgVersion);
     for (const parentPath of file.parents) {
       const parentFile = tracedFiles[parentPath];
       if (!parentFile || parentFile.pkgName === file.pkgName) continue;
@@ -398,69 +396,44 @@ function assignCopies(tracedFiles: Record<string, TracedFile>): Map<string, stri
       deps.get(parentFile.pkgPathReal)!.set(file.pkgName, file.pkgPathReal);
     }
   }
-
-  const extraCopies = new Map<string, number>(); // name@version -> extra copies so far
-  // Folders that load more dependencies pick their part first, so one that loads fewer joins
-  // a matching part instead of opening one of its own
+  // Folders that load more dependencies pick their copy first, so one that loads fewer joins a
+  // matching copy instead of opening one of its own
   const loadCount = (folder: string) => deps.get(folder)?.size ?? 0;
-  const folders = [...copies.keys()].sort((a, b) => loadCount(b) - loadCount(a));
-  // name@copy -> its parts, each with the dependency copies its folders load
-  let parts = new Map<string, Array<{ id: string; copy: string; loads: Map<string, string> }>>();
-  // Splitting a copy can split the copies that load it, so repeat until nothing splits
-  let split = true;
-  while (split) {
-    split = false;
+  const folders = [...packages.keys()].sort((a, b) => loadCount(b) - loadCount(a));
+
+  // Each pass groups every name@version anew, by the copies its dependencies got in the pass
+  // before, until a pass changes nothing
+  let copies = new Map(folders.map(folder => [folder, packages.get(folder)!.pkgVersion]));
+  for (let pass = 0; pass <= folders.length; pass++) {
     const next = new Map<string, string>();
-    parts = new Map();
+    const groups = new Map<string, Array<Map<string, string>>>(); // name@version -> each copy's loads
     for (const folder of folders) {
-      const copy = copies.get(folder)!;
       const { pkgName, pkgVersion } = packages.get(folder)!;
+      const group = groups.get(`${pkgName}@${pkgVersion}`) ?? [];
+      groups.set(`${pkgName}@${pkgVersion}`, group);
       const loads = [...(deps.get(folder) ?? [])].map(
         ([name, dep]) => [name, copies.get(dep)!] as const
       );
-      const group = parts.get(`${pkgName}@${copy}`) ?? [];
-      parts.set(`${pkgName}@${copy}`, group);
-      let part = group.find(p => loads.every(([name, dep]) => (p.loads.get(name) ?? dep) === dep));
-      if (!part) {
-        // The first part keeps the copy; each extra one gets the next free `<version>_<n>`
-        const n = group.length ? (extraCopies.get(`${pkgName}@${pkgVersion}`) ?? 0) + 1 : 0;
-        if (n) extraCopies.set(`${pkgName}@${pkgVersion}`, n);
-        part = {
-          id: `${pkgName}@${pkgVersion}`,
-          copy: n ? `${pkgVersion}_${n}` : copy,
-          loads: new Map(),
-        };
-        group.push(part);
-        split ||= n > 0;
-      }
-      for (const [name, dep] of loads) part.loads.set(name, dep);
-      next.set(folder, part.copy);
+      let n = group.findIndex(copy =>
+        loads.every(([name, dep]) => (copy.get(name) ?? dep) === dep)
+      );
+      if (n === -1) n = group.push(new Map()) - 1;
+      for (const [name, dep] of loads) group[n]!.set(name, dep);
+      next.set(folder, n ? `${pkgVersion}_${n}` : pkgVersion);
     }
+    if (folders.every(folder => next.get(folder) === copies.get(folder))) return copies;
     copies = next;
   }
-
-  // A split one level down can leave a copy whose loads match another copy of its version
-  const kept = new Map<string, Array<{ copy: string; loads: Map<string, string> }>>();
-  const mergedInto = new Map<string, string>(); // name@version and copy -> the copy it merges into
-  const allParts = [...parts.values()].flat().sort((a, b) => b.loads.size - a.loads.size);
-  for (const { id, copy, loads } of allParts) {
-    const group = kept.get(id) ?? [];
-    kept.set(id, group);
-    const into = group.find(p =>
-      [...loads].every(([name, dep]) => (p.loads.get(name) ?? dep) === dep)
-    );
-    if (!into) {
-      group.push({ copy, loads });
-      continue;
-    }
-    for (const [name, dep] of loads) into.loads.set(name, dep);
-    mergedInto.set(`${id} ${copy}`, into.copy);
-  }
-  for (const [folder, copy] of copies) {
-    const { pkgName, pkgVersion } = packages.get(folder)!;
-    copies.set(folder, mergedInto.get(`${pkgName}@${pkgVersion} ${copy}`) ?? copy);
-  }
-  return copies;
+  // No pass settled: one copy per folder loads what the source loads
+  const seen = new Map<string, number>(); // name@version -> folders so far
+  return new Map(
+    folders.map(folder => {
+      const { pkgName, pkgVersion } = packages.get(folder)!;
+      const n = seen.get(`${pkgName}@${pkgVersion}`) ?? 0;
+      seen.set(`${pkgName}@${pkgVersion}`, n + 1);
+      return [folder, n ? `${pkgVersion}_${n}` : pkgVersion];
+    })
+  );
 }
 
 /**
