@@ -7,7 +7,7 @@
     "test": "node test.js"
   },
   "dependencies": {
-    "peer-dep": "file:./packages/dep-1",
+    "peer-dep": "file:./packages/dep-2",
     "peer-typed": "file:./packages/typed",
     "peer-user": "file:./packages/user",
     "peer-wrapper": "file:./packages/wrapper",

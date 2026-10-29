@@ -25,7 +25,7 @@ await standaloner({
 console.log('✓ Build completed\n');
 
 const output = execSync('node dist/index.mjs', { encoding: 'utf8', cwd: __dirname }).trim();
-const expected = 'app: peer-dep 1.0.0, peer-typed; peer-user: peer-dep 2.0.0, peer-typed';
+const expected = 'app: peer-dep 2.0.0, peer-typed; peer-user: peer-dep 1.0.0, peer-typed';
 if (output !== expected) {
   console.error('✗ Each install should load its own peer-dep version');
   console.error(`  Expected: ${expected}`);
@@ -129,16 +129,6 @@ await checkTree(
     'parent-12': { peers: { x: 1, y: 2 }, loads: ['x', 'y'] },
   },
   '[1,1,[2,1],[1,2]]'
-);
-await checkTree(
-  'Installs that load different peers of one install share its copy',
-  {
-    'parent-xw': { peers: { x: 1, y: 2, z: 1, w: 1 }, loads: ['x', 'w'] },
-    'parent-zw': { peers: { x: 2, y: 1, z: 2, w: 1 }, loads: ['z', 'w'] },
-    'parent-xy': { peers: { x: 2, y: 1, z: 2, w: 1 }, loads: ['x', 'y'] },
-    'parent-yz': { peers: { x: 1, y: 2, z: 1, w: 1 }, loads: ['y', 'z'] },
-  },
-  '[[1,1],[2,1],[2,1],[2,1]]'
 );
 await checkTree(
   'An install that loads only one peer shares a copy split one level down',

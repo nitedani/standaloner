@@ -348,7 +348,11 @@ async function processTracedFiles(
       // Add package name to build summary instead of logging
       buildSummary.addPackageName(name);
       // Sort versions newest first to easily identify the latest
-      const sortedVersions = versionEntries.sort(([v1], [v2]) => compareVersions(v1, v2));
+      // A version's first copy, the app's own install, sorts before its `_<n>` copies
+      const sortedVersions = versionEntries.sort(
+        ([v1], [v2]) =>
+          compareVersions(v1, v2) || Number(v1.includes('_')) - Number(v2.includes('_'))
+      );
 
       // Copy each version into the dedicated .versions directory
       for (const [version, files] of sortedVersions) {
@@ -388,74 +392,61 @@ async function processTracedFiles(
 function assignCopies(tracedFiles: Record<string, TracedFile>): Map<string, string> {
   const packages = new Map<string, TracedFile>(); // pkgPathReal -> a file of that package
   const deps = new Map<string, Map<string, string>>(); // pkgPathReal -> dependency name -> its pkgPathReal
+  const appImported = new Set<string>(); // pkgPathReal of packages the app's own files import
   for (const file of Object.values(tracedFiles)) {
     packages.set(file.pkgPathReal, file);
     for (const parentPath of file.parents) {
       const parentFile = tracedFiles[parentPath];
+      if (!parentFile) appImported.add(file.pkgPathReal);
       if (!parentFile || parentFile.pkgName === file.pkgName) continue;
       if (!deps.has(parentFile.pkgPathReal)) deps.set(parentFile.pkgPathReal, new Map());
       deps.get(parentFile.pkgPathReal)!.set(file.pkgName, file.pkgPathReal);
     }
   }
-  const groups = new Map<string, string[]>(); // name@version -> its folders
-  for (const [folder, { pkgName, pkgVersion }] of packages) {
-    const id = `${pkgName}@${pkgVersion}`;
-    if (!groups.has(id)) groups.set(id, []);
-    groups.get(id)!.push(folder);
-  }
+  // The app's own install takes `<version>`, which the top-level link points to. Folders that
+  // load more dependencies pick their copy first, so one that loads fewer joins a matching copy
+  // instead of opening one of its own. Paths break ties, so every build names copies alike.
+  const loadCount = (folder: string) => deps.get(folder)?.size ?? 0;
+  const folders = [...packages.keys()].sort(
+    (a, b) =>
+      Number(appImported.has(b)) - Number(appImported.has(a)) ||
+      loadCount(b) - loadCount(a) ||
+      a.localeCompare(b)
+  );
 
   // Each pass groups every name@version anew, by the copies its dependencies got in the pass
   // before, until a pass changes nothing
-  let copies = new Map([...packages].map(([folder, { pkgVersion }]) => [folder, pkgVersion]));
-  for (let pass = 0; pass <= packages.size; pass++) {
+  let copies = new Map(folders.map(folder => [folder, packages.get(folder)!.pkgVersion]));
+  for (let pass = 0; pass <= folders.length; pass++) {
     const next = new Map<string, string>();
-    for (const folders of groups.values()) {
-      const loads = folders.map(folder => {
-        const folderDeps = [...(deps.get(folder) ?? [])];
-        return new Map(folderDeps.map(([name, dep]) => [name, copies.get(dep)!]));
-      });
-      // Two folders need separate copies when they load different copies of one dependency
-      const conflict = (i: number, j: number) =>
-        [...loads[i]!].some(([name, dep]) => (loads[j]!.get(name) ?? dep) !== dep);
-      const numbers = fewestCopies(folders.length, conflict);
-      folders.forEach((folder, i) => {
-        const { pkgVersion } = packages.get(folder)!;
-        next.set(folder, numbers[i] ? `${pkgVersion}_${numbers[i]}` : pkgVersion);
-      });
+    const groups = new Map<string, Array<Map<string, string>>>(); // name@version -> each copy's loads
+    for (const folder of folders) {
+      const { pkgName, pkgVersion } = packages.get(folder)!;
+      const group = groups.get(`${pkgName}@${pkgVersion}`) ?? [];
+      groups.set(`${pkgName}@${pkgVersion}`, group);
+      const loads = [...(deps.get(folder) ?? [])].map(
+        ([name, dep]) => [name, copies.get(dep)!] as const
+      );
+      let n = group.findIndex(copy =>
+        loads.every(([name, dep]) => (copy.get(name) ?? dep) === dep)
+      );
+      if (n === -1) n = group.push(new Map()) - 1;
+      for (const [name, dep] of loads) group[n]!.set(name, dep);
+      next.set(folder, n ? `${pkgVersion}_${n}` : pkgVersion);
     }
-    if ([...packages.keys()].every(folder => next.get(folder) === copies.get(folder))) {
-      return copies;
-    }
+    if (folders.every(folder => next.get(folder) === copies.get(folder))) return copies;
     copies = next;
   }
   // No pass settled: one copy per folder loads what the source loads
+  const seen = new Map<string, number>(); // name@version -> folders so far
   return new Map(
-    [...groups.values()].flatMap(folders =>
-      folders.map((folder, n) => {
-        const { pkgVersion } = packages.get(folder)!;
-        return [folder, n ? `${pkgVersion}_${n}` : pkgVersion] as const;
-      })
-    )
+    folders.map(folder => {
+      const { pkgName, pkgVersion } = packages.get(folder)!;
+      const n = seen.get(`${pkgName}@${pkgVersion}`) ?? 0;
+      seen.set(`${pkgName}@${pkgVersion}`, n + 1);
+      return [folder, n ? `${pkgVersion}_${n}` : pkgVersion];
+    })
   );
-}
-
-/**
- * Numbers items 0..k-1 with the smallest k such that no two conflicting items share a number,
- * by trying k = 1, 2, ... (a version rarely has more than a few installs).
- */
-function fewestCopies(count: number, conflict: (i: number, j: number) => boolean): number[] {
-  const numbers: number[] = [];
-  const place = (i: number, k: number, used: number): boolean => {
-    if (i === count) return true;
-    // A new number only after every used one, so the same split isn't tried under other numbers
-    for (let n = 0; n < Math.min(k, used + 1); n++) {
-      if (numbers.slice(0, i).some((other, j) => other === n && conflict(i, j))) continue;
-      numbers[i] = n;
-      if (place(i + 1, k, Math.max(used, n + 1))) return true;
-    }
-    return false;
-  };
-  for (let k = 1; ; k++) if (place(0, k, 0)) return numbers.slice(0, count);
 }
 
 /**
