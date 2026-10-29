@@ -382,7 +382,8 @@ async function processTracedFiles(
 
 /**
  * Maps each traced package folder (pkgPathReal) to its output copy: `<version>`, or
- * `<version>_<n>` when folders of one name@version load different copies of a dependency.
+ * `<version>_<n>` when folders of one name@version load different copies of a dependency
+ * (every folder its own copy if the grouping never settles).
  */
 function assignCopies(tracedFiles: Record<string, TracedFile>): Map<string, string> {
   const packages = new Map<string, TracedFile>(); // pkgPathReal -> a file of that package
