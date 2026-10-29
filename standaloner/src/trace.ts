@@ -100,7 +100,8 @@ async function trace({
   });
 
   // Trace files and get package info
-  const tracedFiles = await traceProjectFiles(input, baseDir, outDir);
+  const pnpAliases: PnpAliases = new Map();
+  const tracedFiles = await traceProjectFiles(input, baseDir, outDir, pnpAliases);
 
   if (Object.keys(tracedFiles).length === 0) {
     logVerbose('No traceable package dependencies found.');
@@ -117,7 +118,7 @@ async function trace({
   await addNativeBinaries(tracedFiles);
 
   // Copy/link dependencies based on trace results
-  await processTracedFiles(tracedFiles, { nodeModulesPath, versionsPath });
+  await processTracedFiles(tracedFiles, { nodeModulesPath, versionsPath, pnpAliases });
 
   // Record dependency statistics in build summary
   const packageRegistry: Record<string, Record<string, string[]>> = {};
@@ -164,19 +165,29 @@ function pnpPackageDir(pkgName: string, issuer: string): string | undefined {
  * Under Yarn PnP there is no node_modules tree for nft to walk: ask PnP for the package's
  * folder and let nft's own resolver apply `exports` from a file next to it.
  */
+/** npm: aliases found under PnP: alias name -> the name and version of the package it installs. */
+type PnpAliases = Map<string, { name: string; version: string }>;
+
 async function pnpResolve(
   id: string,
   parent: string,
   job: Parameters<typeof nftDefaultResolve>[2],
-  cjsResolve: boolean
+  cjsResolve: boolean,
+  aliases: PnpAliases
 ): Promise<string | string[] | undefined> {
   const pkgName = id.split('/').slice(0, id.startsWith('@') ? 2 : 1).join('/');
   const pkgDir = pnpPackageDir(pkgName, parent);
   if (!pkgDir) return undefined;
-  const pkgSuffix = path.join('node_modules', pkgName);
-  if (pkgDir.endsWith(path.sep + pkgSuffix)) {
-    const issuer = path.join(pkgDir.slice(0, -pkgSuffix.length), 'index.js');
-    return nftDefaultResolve(id, issuer, job, cjsResolve);
+  const nodeModulesDir = pkgDir.lastIndexOf(path.sep + 'node_modules' + path.sep);
+  const dirName = pkgDir.slice(nodeModulesDir + 'node_modules'.length + 2).split(path.sep).join('/');
+  if (nodeModulesDir !== -1 && dirName.split('/').length === (dirName.startsWith('@') ? 2 : 1)) {
+    // An npm: alias sits in the folder of the package it installs, under that package's name
+    if (dirName !== pkgName) {
+      const version = (await readPkgJson(pkgDir))?.version || DEFAULT_VERSION;
+      aliases.set(pkgName, { name: dirName, version });
+    }
+    const issuer = path.join(pkgDir.slice(0, nodeModulesDir), 'index.js');
+    return nftDefaultResolve(dirName + id.slice(pkgName.length), issuer, job, cjsResolve);
   }
   // A workspace, portal: or link: package has no node_modules folder above it: nft applies its
   // `exports` as for the package importing itself, else resolves the path inside its folder
@@ -194,7 +205,8 @@ async function pnpResolve(
 async function traceProjectFiles(
   entryFiles: string[],
   baseDir: string,
-  outDir: string
+  outDir: string,
+  pnpAliases: PnpAliases
 ): Promise<Record<string, TracedFile>> {
   // Warn loudly when the same external specifier resolves to different versions from
   // different importers. The bundler collapses externals to a single import in the output,
@@ -216,7 +228,7 @@ async function traceProjectFiles(
       try {
         return await nftDefaultResolve(id, parent, job, cjsResolve);
       } catch (err) {
-        const pnpResolved = await pnpResolve(id, parent, job, cjsResolve);
+        const pnpResolved = await pnpResolve(id, parent, job, cjsResolve, pnpAliases);
         if (pnpResolved) return pnpResolved;
         const fallback = await pickLatestOrigin(id);
         if (fallback) return fallback;
@@ -359,7 +371,11 @@ async function resolveNodeModulesPackage(
  */
 async function processTracedFiles(
   tracedFiles: Record<string, TracedFile>,
-  { nodeModulesPath, versionsPath }: { nodeModulesPath: string; versionsPath: string }
+  {
+    nodeModulesPath,
+    versionsPath,
+    pnpAliases,
+  }: { nodeModulesPath: string; versionsPath: string; pnpAliases: PnpAliases }
 ): Promise<void> {
   // Group files by package name and version for easier processing
   const packageRegistry: Record<string, Record<string, string[]>> = {}; // { [pkgName]: { [version]: [filePath, ...] } }
@@ -421,6 +437,16 @@ async function processTracedFiles(
   logVerbose('Creating top-level symlinks...');
   // Finally, create the top-level symlinks for the newest versions of multi-version packages
   await Promise.all(topLevelSymlinkTasks.map(task => createSymlink(task.source, task.target)));
+
+  // Under PnP an npm: alias was traced under the name of the package it installs: link it
+  for (const [alias, { name, version }] of pnpAliases) {
+    const versions = packageRegistry[name];
+    if (packageRegistry[alias] || !versions?.[version]) continue;
+    const source = multiVersionPackages[name]
+      ? path.join(versionsPath, `${name}@${version}`)
+      : path.join(nodeModulesPath, name);
+    await createSymlink(source, path.join(nodeModulesPath, alias));
+  }
 }
 
 /**
