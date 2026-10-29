@@ -387,7 +387,7 @@ async function processTracedFiles(
 /**
  * Maps each traced package folder (pkgPathReal) to its output copy: `<version>`, or
  * `<version>_<n>` when folders of one name@version load different copies of a dependency
- * (every folder its own copy if the grouping never settles).
+ * (by the very dependency folders they load if the grouping never settles).
  */
 function assignCopies(tracedFiles: Record<string, TracedFile>): Map<string, string> {
   const deps = new Map<string, Map<string, string>>(); // pkgPathReal -> dependency name -> its pkgPathReal
@@ -431,12 +431,15 @@ function assignCopies(tracedFiles: Record<string, TracedFile>): Map<string, stri
     }
     copies = next;
   }
-  // No pass settled: one copy per folder loads what the source loads
-  const seen = new Map<string, number>(); // name@version -> folders so far
+  // No pass settled: folders that load the very same dependency folders share a copy
+  const fallback = new Map<string, Map<string, number>>(); // name@version -> loads -> copy number
   return new Map(
     folders.map(({ pkgPathReal: folder, pkgName, pkgVersion }) => {
-      const n = seen.get(`${pkgName}@${pkgVersion}`) ?? 0;
-      seen.set(`${pkgName}@${pkgVersion}`, n + 1);
+      const group = fallback.get(`${pkgName}@${pkgVersion}`) ?? new Map<string, number>();
+      fallback.set(`${pkgName}@${pkgVersion}`, group);
+      const loads = JSON.stringify([...(deps.get(folder) ?? [])].sort());
+      if (!group.has(loads)) group.set(loads, group.size);
+      const n = group.get(loads)!;
       return [folder, n ? `${pkgVersion}_${n}` : pkgVersion];
     })
   );
