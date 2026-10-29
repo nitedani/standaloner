@@ -397,28 +397,8 @@ async function processTracedFiles(
 ): Promise<void> {
   // Group files by package name and version for easier processing
   const packageRegistry: Record<string, Record<string, string[]>> = {}; // { [pkgName]: { [version]: [filePath, ...] } }
-  // A workspace or portal: folder with the name and version of an npm package (a fork that kept
-  // both) can't get a folder of its own: copy the local one and say so
-  const inNodeModules = (dir: string) => dir.includes(`${path.sep}node_modules${path.sep}`);
-  const localRoots = new Map<string, string>();
-  for (const file of Object.values(tracedFiles)) {
-    if (!inNodeModules(file.pkgPathReal)) {
-      localRoots.set(`${file.pkgName}@${file.pkgVersion}`, file.pkgPathReal);
-    }
-  }
-  const shadowed = new Set<string>();
   for (const file of Object.values(tracedFiles)) {
     // Assumes file processing already filtered out non-package files
-    const key = `${file.pkgName}@${file.pkgVersion}`;
-    if (inNodeModules(file.pkgPathReal) && localRoots.has(key)) {
-      if (!shadowed.has(key)) {
-        shadowed.add(key);
-        logWarning(
-          `${key} is both ${localRoots.get(key)} and an npm package: only the first is copied`
-        );
-      }
-      continue;
-    }
     packageRegistry[file.pkgName] ??= {};
     packageRegistry[file.pkgName]![file.pkgVersion] ??= [];
     packageRegistry[file.pkgName]![file.pkgVersion]!.push(file.path);
