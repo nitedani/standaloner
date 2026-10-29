@@ -150,22 +150,24 @@ function traceBaseFor(baseDir: string): string {
   return process.versions.pnp ? path.parse(baseDir).root : baseDir;
 }
 
+/** Under Yarn PnP, the folder of `pkgName` as `issuer` sees it (in Yarn's cache or unplugged). */
+function pnpPackageDir(pkgName: string, issuer: string): string | undefined {
+  try {
+    const pkgDir = findPnpApi?.(issuer)?.resolveToUnqualified(pkgName, issuer);
+    return pkgDir ? path.normalize(pkgDir).replace(/[\\/]+$/, '') : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Under Yarn PnP there is no node_modules tree for nft to walk: ask PnP for the package's
  * folder and return a file next to it, from which nft's own resolver applies `exports`.
  */
 function pnpIssuerFor(id: string, parent: string): string | undefined {
-  const pnpApi = findPnpApi?.(parent);
-  if (!pnpApi) return undefined;
   const pkgName = id.split('/').slice(0, id.startsWith('@') ? 2 : 1).join('/');
-  let pkgDir: string | null;
-  try {
-    pkgDir = pnpApi.resolveToUnqualified(pkgName, parent);
-  } catch {
-    return undefined;
-  }
+  const pkgDir = pnpPackageDir(pkgName, parent);
   const pkgSuffix = path.join('node_modules', pkgName);
-  pkgDir = pkgDir && path.normalize(pkgDir).replace(/[\\/]+$/, '');
   if (!pkgDir?.endsWith(path.sep + pkgSuffix)) return undefined;
   return path.join(pkgDir.slice(0, -pkgSuffix.length), 'index.js');
 }
@@ -676,6 +678,8 @@ async function findOptionalDepRoot(
   depName: string,
   parentFile: string
 ): Promise<string | null> {
+  const pnpDir = pnpPackageDir(depName, parentFile);
+  if (pnpDir) return existsSync(path.join(pnpDir, 'package.json')) ? pnpDir : null;
   let current = path.dirname(parentFile);
   while (true) {
     const candidate = path.join(current, 'node_modules', depName);
