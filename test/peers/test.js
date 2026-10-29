@@ -66,78 +66,86 @@ if (missing.length) {
 }
 console.log('✓ Each copy ships its native binary\n');
 
-// npm-style trees: each consumer nests its own shared@1.0.0 (peers x and y), x, y and maybe z
+// npm-style trees: each consumer nests its own shared@1.0.0 and its peers; a peer given as
+// { z } is x@1.0.0 loading its own peer z
 const pkg = (name, version, main) => ({
   'package.json': JSON.stringify({ name, version: `${version}.0.0`, main: 'index.cjs' }),
   'index.cjs': `module.exports = ${main};`,
 });
-const checkTree = (title, consumers, expected) => {
+const checkTree = async (title, consumers, expected) => {
   const treeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'standaloner-peers-'));
-  const files = {};
+  const files = {
+    'src/package.json': JSON.stringify({ name: 'tree', private: true }),
+    'src/index.cjs': `console.log(JSON.stringify([${Object.keys(consumers).map(c => `require('${c}')`)}]));`,
+  };
   const add = (dir, pkgFiles) => {
     for (const [file, content] of Object.entries(pkgFiles)) files[`${dir}/${file}`] = content;
   };
-  for (const [name, { x, y, z, loads }] of Object.entries(consumers)) {
+  for (const [name, { peers, loads }] of Object.entries(consumers)) {
     const dir = `src/node_modules/${name}`;
-    add(dir, pkg(name, 1, loads));
-    add(`${dir}/node_modules/shared`, {
-      'package.json': JSON.stringify({
-        name: 'shared',
-        version: '1.0.0',
-        peerDependencies: { x: '*', y: '*' },
-      }),
-      'x.cjs': "module.exports = require('x');",
-      'y.cjs': "module.exports = require('y');",
-    });
-    add(`${dir}/node_modules/x`, z ? pkg('x', 1, "'x' + require('z')") : pkg('x', x, x));
-    if (z) add(`${dir}/node_modules/z`, pkg('z', z, `'z${z}'`));
-    add(`${dir}/node_modules/y`, pkg('y', y, y));
+    const required = loads.map(peer => `require('shared/${peer}.cjs')`);
+    add(dir, pkg(name, 1, required.length === 1 ? required[0] : `[${required}]`));
+    const shared = { 'package.json': JSON.stringify({ name: 'shared', version: '1.0.0' }) };
+    for (const [peer, version] of Object.entries(peers)) {
+      shared[`${peer}.cjs`] = `module.exports = require('${peer}');`;
+      if (typeof version === 'number')
+        add(`${dir}/node_modules/${peer}`, pkg(peer, version, version));
+      else {
+        add(`${dir}/node_modules/${peer}`, pkg(peer, 1, `'${peer}' + require('z')`));
+        add(`${dir}/node_modules/z`, pkg('z', version.z, `'z${version.z}'`));
+      }
+    }
+    add(`${dir}/node_modules/shared`, shared);
   }
-  const entry = `console.log(JSON.stringify([${Object.keys(consumers).map(c => `require('${c}')`)}]));`;
-  files['src/package.json'] = JSON.stringify({ name: 'tree', private: true });
-  files['src/index.cjs'] = entry;
   for (const [file, content] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(treeDir, file)), { recursive: true });
     fs.writeFileSync(path.join(treeDir, file), content);
   }
-  return standaloner({
+  await standaloner({
     input: path.join(treeDir, 'src/index.cjs'),
     outDir: path.join(treeDir, 'out'),
     bundle: false,
     verbose: false,
-  }).then(() => {
-    fs.writeFileSync(path.join(treeDir, 'out/index.cjs'), entry);
-    const output = execSync('node out/index.cjs', { encoding: 'utf8', cwd: treeDir }).trim();
-    const shared = fs.readdirSync(path.join(treeDir, 'out/node_modules/.versions'));
-    const copies = shared.filter(d => d.startsWith('shared@')).length;
-    fs.rmSync(treeDir, { recursive: true });
-    if (output !== expected || copies !== 2) {
-      console.error(`✗ ${title}`);
-      console.error(`  Expected: ${expected} with 2 copies of shared`);
-      console.error(`  Got:      ${output} with ${copies} copies of shared`);
-      process.exit(1);
-    }
-    console.log(`✓ ${title}\n`);
   });
+  fs.copyFileSync(path.join(treeDir, 'src/index.cjs'), path.join(treeDir, 'out/index.cjs'));
+  const output = execSync('node out/index.cjs', { encoding: 'utf8', cwd: treeDir }).trim();
+  const versions = fs.readdirSync(path.join(treeDir, 'out/node_modules/.versions'));
+  const copies = versions.filter(d => d.startsWith('shared@')).length;
+  fs.rmSync(treeDir, { recursive: true });
+  if (output !== expected || copies !== 2) {
+    console.error(`✗ ${title}`);
+    console.error(`  Expected: ${expected} with 2 copies of shared`);
+    console.error(`  Got:      ${output} with ${copies} copies of shared`);
+    process.exit(1);
+  }
+  console.log(`✓ ${title}\n`);
 };
-const both = "[require('shared/x.cjs'), require('shared/y.cjs')]";
 await checkTree(
   'Installs that load only one peer share a matching copy',
   {
-    'parent-x': { x: 1, y: 2, loads: "require('shared/x.cjs')" },
-    'parent-y': { x: 2, y: 1, loads: "require('shared/y.cjs')" },
-    'parent-21': { x: 2, y: 1, loads: both },
-    'parent-12': { x: 1, y: 2, loads: both },
+    'parent-x': { peers: { x: 1, y: 2 }, loads: ['x'] },
+    'parent-y': { peers: { x: 2, y: 1 }, loads: ['y'] },
+    'parent-21': { peers: { x: 2, y: 1 }, loads: ['x', 'y'] },
+    'parent-12': { peers: { x: 1, y: 2 }, loads: ['x', 'y'] },
   },
   '[1,1,[2,1],[1,2]]'
 );
-// x splits by its own peer z, after shared's first grouping
+await checkTree(
+  'Installs that load different peers of one install share its copy',
+  {
+    'parent-xw': { peers: { x: 1, y: 2, z: 1, w: 1 }, loads: ['x', 'w'] },
+    'parent-zw': { peers: { x: 2, y: 1, z: 2, w: 1 }, loads: ['z', 'w'] },
+    'parent-xy': { peers: { x: 2, y: 1, z: 2, w: 1 }, loads: ['x', 'y'] },
+    'parent-yz': { peers: { x: 1, y: 2, z: 1, w: 1 }, loads: ['y', 'z'] },
+  },
+  '[[1,1],[2,1],[2,1],[2,1]]'
+);
 await checkTree(
   'An install that loads only one peer shares a copy split one level down',
   {
-    'parent-22': { z: 2, y: 2, loads: both },
-    'parent-11': { z: 1, y: 1, loads: both },
-    'parent-x': { z: 1, y: 2, loads: "require('shared/x.cjs')" },
+    'parent-22': { peers: { x: { z: 2 }, y: 2 }, loads: ['x', 'y'] },
+    'parent-11': { peers: { x: { z: 1 }, y: 1 }, loads: ['x', 'y'] },
+    'parent-x': { peers: { x: { z: 1 }, y: 2 }, loads: ['x'] },
   },
   '[["xz2",2],["xz1",1],"xz1"]'
 );
