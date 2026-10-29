@@ -163,20 +163,12 @@ function pnpPackageDir(pkgName: string, issuer: string): string | undefined {
 
 /**
  * Imports resolved under PnP, per importing file: the package's folder `dir`, whether it is a
- * workspace or portal: folder (`local`, with its package.json name `ownName`), and the name and
- * version of the package each installs.
+ * workspace or portal: folder (`local`, with its package.json name `ownName`), and the name of
+ * the package each installs.
  */
 type PnpAliases = Map<
   string,
-  {
-    parent: string;
-    alias: string;
-    name: string;
-    version: string;
-    dir: string;
-    local: boolean;
-    ownName?: string;
-  }
+  { parent: string; alias: string; name: string; dir: string; local: boolean; ownName?: string }
 >;
 const LOCAL_VERSION_SUFFIX = '-local';
 
@@ -199,20 +191,18 @@ async function pnpResolve(
   const dirName = pkgDir.slice(nodeModulesDir + 'node_modules'.length + 2).split(path.sep).join('/');
   const inNodeModules =
     nodeModulesDir !== -1 && dirName.split('/').length === (dirName.startsWith('@') ? 2 : 1);
-  const pkgJson = inNodeModules && dirName === pkgName ? null : await readPkgJson(pkgDir);
+  const pkgJson = inNodeModules ? null : await readPkgJson(pkgDir);
   if (!inNodeModules && !pkgJson) return undefined;
-  const version = pkgJson?.version || DEFAULT_VERSION;
   const key = `${parent}\0${pkgName}`;
   if (!inNodeModules) {
     // A workspace, portal: or link: package has no node_modules folder above it: its name in
     // the output is chosen once every import of it is known (nameLocalFolders)
     const dir = realpathSync(pkgDir);
     const ownName = pkgJson?.name;
-    aliases.set(key, { parent, alias: pkgName, name: '', version, dir, local: true, ownName });
+    aliases.set(key, { parent, alias: pkgName, name: '', dir, local: true, ownName });
   } else {
     // An npm package's folder is named after it, an npm: alias's after the package it installs
-    const entry = { parent, alias: pkgName, name: dirName, version, dir: pkgDir, local: false };
-    aliases.set(key, entry);
+    aliases.set(key, { parent, alias: pkgName, name: dirName, dir: pkgDir, local: false });
   }
   if (inNodeModules) {
     const issuer = path.join(pkgDir.slice(0, nodeModulesDir), 'index.js');
@@ -508,9 +498,8 @@ async function processTracedFiles(
       const appImport = [...pnpAliases.values()].find(
         a => a.alias === name && a.name === name && !tracedFiles[a.parent]
       );
-      const appVersion = appImport && dirVersions.get(appImport.dir);
       const newestVersionStr =
-        appVersion && versions[appVersion] ? appVersion : sortedVersions[0]![0];
+        (appImport && dirVersions.get(appImport.dir)) ?? sortedVersions[0]![0];
       topLevelSymlinkTasks.push({
         source: path.join(versionsPath, `${name}@${newestVersionStr}`), // Source is in .versions
         target: path.join(nodeModulesPath, name), // Target is in top-level node_modules
@@ -538,11 +527,9 @@ async function processTracedFiles(
     multiVersionPackages[name]
       ? path.join(versionsPath, `${name}@${version}`)
       : path.join(nodeModulesPath, name);
-  for (const { parent, alias, name, version: pkgVersion, local } of pnpAliases.values()) {
-    if (alias === name) continue;
-    const localVersion = pkgVersion + LOCAL_VERSION_SUFFIX;
-    const version = local && packageRegistry[name]?.[localVersion] ? localVersion : pkgVersion;
-    if (!packageRegistry[name]?.[version]) continue;
+  for (const { parent, alias, name, dir } of pnpAliases.values()) {
+    const version = dirVersions.get(dir);
+    if (alias === name || !version) continue;
     const importer = tracedFiles[parent];
     if (!importer && packageRegistry[alias]) continue;
     const target = importer
