@@ -120,10 +120,11 @@ async function trace({
 
   // Pick up prebuilt native binaries that nft's static analysis misses
   // (node-gyp-build, prebuild-install, napi-rs — dynamic require by platform/arch).
-  await addNativeBinaries(tracedFiles);
+  const copies = assignCopies(tracedFiles);
+  await addNativeBinaries(tracedFiles, copies);
 
   // Copy/link dependencies based on trace results
-  await processTracedFiles(tracedFiles, { nodeModulesPath, versionsPath });
+  await processTracedFiles(tracedFiles, copies, { nodeModulesPath, versionsPath });
 
   // Record dependency statistics in build summary
   const packageRegistry: Record<string, Record<string, string[]>> = {};
@@ -314,10 +315,10 @@ async function resolveNodeModulesPackage(
  */
 async function processTracedFiles(
   tracedFiles: Record<string, TracedFile>,
+  copies: Map<string, string>, // pkgPathReal -> output copy (assignCopies)
   { nodeModulesPath, versionsPath }: { nodeModulesPath: string; versionsPath: string }
 ): Promise<void> {
   // Group files by package name and output copy for easier processing
-  const copies = assignCopies(tracedFiles);
   const packageRegistry: Record<string, Record<string, string[]>> = {}; // { [pkgName]: { [copy]: [filePath, ...] } }
   for (const file of Object.values(tracedFiles)) {
     // Assumes file processing already filtered out non-package files
@@ -403,7 +404,7 @@ function assignCopies(tracedFiles: Record<string, TracedFile>): Map<string, stri
   // matching copy instead of opening one of its own. Paths break ties, so every build names
   // copies alike.
   const loadCount = (folder: string) => deps.get(folder)?.size ?? 0;
-  const folders = uniquePackages(tracedFiles).sort(
+  const folders = uniquePackages(tracedFiles, file => file.pkgPathReal).sort(
     ({ pkgPathReal: a }, { pkgPathReal: b }) => loadCount(b) - loadCount(a) || a.localeCompare(b)
   );
 
@@ -752,12 +753,15 @@ async function readContainingPkgJson(
   return { root, pkgJson };
 }
 
-/** Returns one sample `TracedFile` per traced package folder in the trace map. */
-function uniquePackages(tracedFiles: Record<string, TracedFile>): TracedFile[] {
+/** Returns one sample `TracedFile` per `keyOf` (default `pkgName@pkgVersion`) in the trace map. */
+function uniquePackages(
+  tracedFiles: Record<string, TracedFile>,
+  keyOf = (file: TracedFile) => `${file.pkgName}@${file.pkgVersion}`
+): TracedFile[] {
   const seen = new Set<string>();
   const samples: TracedFile[] = [];
   for (const file of Object.values(tracedFiles)) {
-    const key = file.pkgPathReal;
+    const key = keyOf(file);
     if (seen.has(key)) continue;
     seen.add(key);
     samples.push(file);
@@ -853,8 +857,12 @@ async function emitMultiVersionWarning(
  * Globs each unique traced package for `**\/*.node` and adds any prebuilt binaries
  * that nft's static analysis missed (common for node-gyp-build / prebuild-install / napi-rs).
  */
-async function addNativeBinaries(tracedFiles: Record<string, TracedFile>): Promise<void> {
-  for (const sample of uniquePackages(tracedFiles)) {
+async function addNativeBinaries(
+  tracedFiles: Record<string, TracedFile>,
+  copies: Map<string, string> // pkgPathReal -> output copy: each copy is globbed once
+): Promise<void> {
+  const copyOf = (file: TracedFile) => `${file.pkgName}@${copies.get(file.pkgPathReal)}`;
+  for (const sample of uniquePackages(tracedFiles, copyOf)) {
     try {
       // `exclude: node_modules` prevents descending into nested deps under flat layouts —
       // their .node files belong to the inner package, not to this outer one, and the
