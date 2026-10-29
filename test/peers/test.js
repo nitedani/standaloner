@@ -72,8 +72,15 @@ const pkg = (name, version, main) => ({
   'package.json': JSON.stringify({ name, version: `${version}.0.0`, main: 'index.cjs' }),
   'index.cjs': `module.exports = ${main};`,
 });
-const checkTree = async (title, consumers, expected) => {
+const writeTree = files => {
   const treeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'standaloner-peers-'));
+  for (const [file, content] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(treeDir, file)), { recursive: true });
+    fs.writeFileSync(path.join(treeDir, file), content);
+  }
+  return treeDir;
+};
+const checkTree = async (title, consumers, expected) => {
   const files = {
     'src/package.json': JSON.stringify({ name: 'tree', private: true }),
     'src/index.cjs': `console.log(JSON.stringify([${Object.keys(consumers).map(c => `require('${c}')`)}]));`,
@@ -97,10 +104,7 @@ const checkTree = async (title, consumers, expected) => {
     }
     add(`${dir}/node_modules/shared`, shared);
   }
-  for (const [file, content] of Object.entries(files)) {
-    fs.mkdirSync(path.dirname(path.join(treeDir, file)), { recursive: true });
-    fs.writeFileSync(path.join(treeDir, file), content);
-  }
+  const treeDir = writeTree(files);
   await standaloner({
     input: path.join(treeDir, 'src/index.cjs'),
     outDir: path.join(treeDir, 'out'),
@@ -139,5 +143,38 @@ await checkTree(
   },
   '[["xz2",2],["xz1",1],"xz1"]'
 );
+
+// With bundle: false the app's other files ship beside its entry, so they resolve through the top level
+const appDir = writeTree({
+  'src/package.json': JSON.stringify({ name: 'app', private: true }),
+  'src/index.cjs': "console.log(JSON.stringify([require('./helper.cjs'), require('consumer')]));",
+  'src/helper.cjs': "module.exports = require('dep');",
+  ...Object.fromEntries(
+    [
+      ['src/node_modules/dep', pkg('dep', 1, "'old'")],
+      ['src/node_modules/consumer', pkg('consumer', 1, "require('dep')")],
+      ['src/node_modules/consumer/node_modules/dep', pkg('dep', 2, "'new'")],
+    ].flatMap(([dir, pkgFiles]) =>
+      Object.entries(pkgFiles).map(([file, content]) => [`${dir}/${file}`, content])
+    )
+  ),
+});
+await standaloner({
+  input: path.join(appDir, 'src/index.cjs'),
+  outDir: path.join(appDir, 'out'),
+  bundle: false,
+  verbose: false,
+});
+for (const file of ['index.cjs', 'helper.cjs'])
+  fs.copyFileSync(path.join(appDir, 'src', file), path.join(appDir, 'out', file));
+const appOutput = execSync('node out/index.cjs', { encoding: 'utf8', cwd: appDir }).trim();
+fs.rmSync(appDir, { recursive: true });
+if (appOutput !== '["old","new"]') {
+  console.error("✗ The app's own files should load the app's copy from the top level");
+  console.error('  Expected: ["old","new"]');
+  console.error(`  Got:      ${appOutput}`);
+  process.exit(1);
+}
+console.log("✓ The app's own files load the app's copy from the top level\n");
 
 console.log('=== All Peer Variants Tests Passed! ===');

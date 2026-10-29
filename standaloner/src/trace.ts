@@ -328,6 +328,19 @@ async function processTracedFiles(
     packageRegistry[file.pkgName]![copy]!.push(file.path);
   }
 
+  // The app's own files: the entry files, and the other files of the package they sit in
+  const appPackages = new Set<string>();
+  for (const file of Object.values(tracedFiles)) {
+    const inPackage = (entry: string) => {
+      const relative = path.relative(file.pkgPathReal, entry);
+      return !relative.startsWith('..') && !path.isAbsolute(relative);
+    };
+    if (file.parents.some(parent => !tracedFiles[parent] && inPackage(parent)))
+      appPackages.add(file.pkgPathReal);
+  }
+  const isAppFile = (file: string) =>
+    !tracedFiles[file] || appPackages.has(tracedFiles[file]!.pkgPathReal);
+
   const copyTasks: Promise<void>[] = [];
   const topLevelSymlinkTasks: Array<{ source: string; target: string }> = []; // Top-level links of multi-version packages
   const multiVersionPackages: Record<string, Record<string, string[]>> = {}; // Track packages with multiple versions found
@@ -361,7 +374,7 @@ async function processTracedFiles(
 
       // The top level links to the copy the app's own files import, else to the newest version
       const appImports = ([, files]: [string, string[]]) =>
-        files.some(file => tracedFiles[file]!.parents.some(parent => !tracedFiles[parent]));
+        files.some(file => tracedFiles[file]!.parents.some(isAppFile));
       const [topLevelVersion] = sortedVersions.find(appImports) ?? sortedVersions[0]!;
       topLevelSymlinkTasks.push({
         source: path.join(versionsPath, `${name}@${topLevelVersion}`), // Source is in .versions
