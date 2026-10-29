@@ -229,16 +229,27 @@ async function pnpResolve(
 /**
  * Names each workspace or portal: folder in the output as node_modules would: its package.json
  * name when it is imported by it, else its first import name, made unique when another folder
- * took it. Its other import names link to it.
+ * took it, the folders the app imports first. Its other import names link to it.
  */
 function nameLocalFolders(aliases: PnpAliases, dirNames: Map<string, string>): void {
-  const imports = new Map<string, { names: Set<string>; ownName?: string }>();
+  const imports = new Map<string, { names: Set<string>; ownName?: string; app?: boolean }>();
   for (const { dir, local, alias, ownName } of aliases.values()) {
     if (!local) continue;
-    imports.set(dir, { names: (imports.get(dir)?.names ?? new Set()).add(alias), ownName });
+    const folder = imports.get(dir) ?? { names: new Set(), ownName };
+    imports.set(dir, folder);
+    folder.names.add(alias);
+  }
+  const isAppFile = (file: string) =>
+    !file.includes(`${path.sep}node_modules${path.sep}`) &&
+    ![...imports.keys()].some(dir => file.startsWith(dir + path.sep));
+  for (const { dir, local, parent } of aliases.values()) {
+    if (local && isAppFile(realpathSync(parent))) imports.get(dir)!.app = true;
   }
   const taken = new Set<string>();
-  for (const [dir, { names, ownName }] of [...imports].sort(([a], [b]) => (a < b ? -1 : 1))) {
+  const sorted = [...imports].sort(
+    ([a, { app: appA }], [b, { app: appB }]) => Number(!!appB) - Number(!!appA) || (a < b ? -1 : 1)
+  );
+  for (const [dir, { names, ownName }] of sorted) {
     const base = ownName && names.has(ownName) ? ownName : [...names].sort()[0]!;
     let name = base;
     for (let i = 2; taken.has(name); i++) name = `${base}~${i}`;
