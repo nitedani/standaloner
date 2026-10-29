@@ -142,7 +142,10 @@ async function trace({
   // Don't log here, the build summary will show the results
 }
 
-type PnpApi = { resolveToUnqualified(request: string, issuer: string): string | null };
+type PnpApi = {
+  resolveToUnqualified(request: string, issuer: string): string | null;
+  resolveRequest(request: string, issuer: string, opts: { conditions: Set<string> }): string | null;
+};
 const findPnpApi = (Module as { findPnpApi?: (lookupSource: string) => PnpApi | null }).findPnpApi;
 
 /** Under Yarn PnP, packages live in zip archives outside the project (Yarn's global cache by default). */
@@ -162,14 +165,25 @@ function pnpPackageDir(pkgName: string, issuer: string): string | undefined {
 
 /**
  * Under Yarn PnP there is no node_modules tree for nft to walk: ask PnP for the package's
- * folder and return a file next to it, from which nft's own resolver applies `exports`.
+ * folder and let nft's own resolver apply `exports` from a file next to it.
  */
-function pnpIssuerFor(id: string, parent: string): string | undefined {
+async function pnpResolve(
+  id: string,
+  parent: string,
+  job: Parameters<typeof nftDefaultResolve>[2],
+  cjsResolve: boolean
+): Promise<string | string[] | undefined> {
   const pkgName = id.split('/').slice(0, id.startsWith('@') ? 2 : 1).join('/');
   const pkgDir = pnpPackageDir(pkgName, parent);
+  if (!pkgDir) return undefined;
   const pkgSuffix = path.join('node_modules', pkgName);
-  if (!pkgDir?.endsWith(path.sep + pkgSuffix)) return undefined;
-  return path.join(pkgDir.slice(0, -pkgSuffix.length), 'index.js');
+  if (pkgDir.endsWith(path.sep + pkgSuffix)) {
+    const issuer = path.join(pkgDir.slice(0, -pkgSuffix.length), 'index.js');
+    return nftDefaultResolve(id, issuer, job, cjsResolve);
+  }
+  // A workspace, portal: or link: package has no node_modules folder above it
+  const conditions = new Set([...job.conditions, cjsResolve ? 'require' : 'import']);
+  return findPnpApi?.(parent)?.resolveRequest(id, parent, { conditions }) ?? undefined;
 }
 
 /**
@@ -200,8 +214,8 @@ async function traceProjectFiles(
       try {
         return await nftDefaultResolve(id, parent, job, cjsResolve);
       } catch (err) {
-        const pnpIssuer = pnpIssuerFor(id, parent);
-        if (pnpIssuer) return nftDefaultResolve(id, pnpIssuer, job, cjsResolve);
+        const pnpResolved = await pnpResolve(id, parent, job, cjsResolve);
+        if (pnpResolved) return pnpResolved;
         const fallback = await pickLatestOrigin(id);
         if (fallback) return fallback;
         throw err;
