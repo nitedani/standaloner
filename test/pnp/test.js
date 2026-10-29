@@ -26,7 +26,7 @@ try {
   );
   fs.writeFileSync(path.join(tmpDir, 'yarn.lock'), '');
 
-  console.log('Installing dependencies (lodash, esbuild, dual, local standaloner)...');
+  console.log('Installing dependencies (lodash, esbuild, dual, linked, local standaloner)...');
   execFileSync(
     'corepack',
     [
@@ -35,6 +35,8 @@ try {
       'lodash',
       'esbuild',
       `dual@${fileDep(path.join(__dirname, 'dual'))}`,
+      // portal: keeps the package outside any node_modules folder, as for a workspace
+      `linked@portal:${path.join(__dirname, 'linked').replace(/\\/g, '/')}`,
       `standaloner@${fileDep(path.resolve(__dirname, '../../standaloner'))}`,
     ],
     { stdio: 'inherit', cwd: tmpDir }
@@ -45,13 +47,14 @@ try {
     `import _ from 'lodash';
 import { transformSync } from 'esbuild';
 import { format } from 'dual';
-console.log(format(_.defaults({ a: 1 }, { a: 3, b: 2 })), transformSync('let a = 1').code.trim());
+import { linked } from 'linked';
+console.log(format(_.defaults({ a: 1 }, { a: 3, b: 2 })), transformSync('let a = 1').code.trim(), linked);
 `
   );
   fs.writeFileSync(
     path.join(tmpDir, 'build.js'),
     `import standaloner from 'standaloner';
-await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lodash', 'esbuild', 'dual'] } });
+await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lodash', 'esbuild', 'dual', 'linked'] } });
 `
   );
 
@@ -64,12 +67,12 @@ await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lod
   }).toString();
   console.log('Output:', output.trim());
 
-  const expected = 'esm {"a":1,"b":2} let a = 1;';
+  const expected = 'esm {"a":1,"b":2} let a = 1; linked esm';
   if (output.trim() !== expected) {
     throw new Error(`Expected '${expected}', got '${output.trim()}'`);
   }
   console.log(
-    "✓ Externals traced from Yarn PnP, with the ESM build of a dual package and esbuild's platform binary"
+    "✓ Externals traced from Yarn PnP: the ESM build of dual and portal: packages, esbuild's platform binary"
   );
 } finally {
   fs.rmSync(tmpDir, { recursive: true, force: true });
