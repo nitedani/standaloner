@@ -66,65 +66,80 @@ if (missing.length) {
 }
 console.log('✓ Each copy ships its native binary\n');
 
-// npm-style tree: four installs of shared@1.0.0 with peers x and y; two load only one of them,
-// so two copies serve all four
-const treeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'standaloner-peers-'));
-const write = (file, content) => {
-  fs.mkdirSync(path.dirname(path.join(treeDir, file)), { recursive: true });
-  fs.writeFileSync(path.join(treeDir, file), content);
-};
-const consumers = {
-  'parent-x': [1, 2, "require('shared/x.cjs')"],
-  'parent-y': [2, 1, "require('shared/y.cjs')"],
-  'parent-21': [2, 1, "[require('shared/x.cjs'), require('shared/y.cjs')]"],
-  'parent-12': [1, 2, "[require('shared/x.cjs'), require('shared/y.cjs')]"],
-};
-for (const [name, [x, y, exported]] of Object.entries(consumers)) {
-  const dir = `src/node_modules/${name}`;
-  write(`${dir}/package.json`, JSON.stringify({ name, version: '1.0.0', main: 'index.cjs' }));
-  write(`${dir}/index.cjs`, `module.exports = ${exported};`);
-  for (const [peer, version] of [
-    ['x', x],
-    ['y', y],
-  ]) {
-    write(
-      `${dir}/node_modules/${peer}/package.json`,
-      JSON.stringify({ name: peer, version: `${version}.0.0`, main: 'index.cjs' })
-    );
-    write(`${dir}/node_modules/${peer}/index.cjs`, `module.exports = ${version};`);
-  }
-  const shared = `${dir}/node_modules/shared`;
-  write(
-    `${shared}/package.json`,
-    JSON.stringify({ name: 'shared', version: '1.0.0', peerDependencies: { x: '*', y: '*' } })
-  );
-  write(`${shared}/x.cjs`, "module.exports = require('x');");
-  write(`${shared}/y.cjs`, "module.exports = require('y');");
-}
-const treeEntry = `console.log(JSON.stringify([${Object.keys(consumers)
-  .map(name => `require('${name}')`)
-  .join(', ')}]));`;
-write('src/index.cjs', treeEntry);
-await standaloner({
-  input: path.join(treeDir, 'src/index.cjs'),
-  outDir: path.join(treeDir, 'out'),
-  bundle: false,
-  verbose: false,
+// npm-style trees: each consumer nests its own shared@1.0.0 (peers x and y), x, y and maybe z
+const pkg = (name, version, main) => ({
+  'package.json': JSON.stringify({ name, version: `${version}.0.0`, main: 'index.cjs' }),
+  'index.cjs': `module.exports = ${main};`,
 });
-write('out/index.cjs', treeEntry);
-const treeOutput = execSync('node out/index.cjs', { encoding: 'utf8', cwd: treeDir }).trim();
-const sharedCopies = fs
-  .readdirSync(path.join(treeDir, 'out/node_modules/.versions'))
-  .filter(d => d.startsWith('shared@'));
-if (treeOutput !== '[1,1,[2,1],[1,2]]' || sharedCopies.length !== 2) {
-  console.error(
-    '✗ Installs that load fewer dependencies should share a copy with one that matches'
-  );
-  console.error(`  Expected: [1,1,[2,1],[1,2]] with 2 copies of shared`);
-  console.error(`  Got:      ${treeOutput} with ${sharedCopies.length} copies of shared`);
-  process.exit(1);
-}
-fs.rmSync(treeDir, { recursive: true });
-console.log('✓ Installs that load fewer dependencies share a matching copy\n');
+const checkTree = (title, consumers, expected) => {
+  const treeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'standaloner-peers-'));
+  const files = {};
+  const add = (dir, pkgFiles) => {
+    for (const [file, content] of Object.entries(pkgFiles)) files[`${dir}/${file}`] = content;
+  };
+  for (const [name, { x, y, z, loads }] of Object.entries(consumers)) {
+    const dir = `src/node_modules/${name}`;
+    add(dir, pkg(name, 1, loads));
+    add(`${dir}/node_modules/shared`, {
+      'package.json': JSON.stringify({
+        name: 'shared',
+        version: '1.0.0',
+        peerDependencies: { x: '*', y: '*' },
+      }),
+      'x.cjs': "module.exports = require('x');",
+      'y.cjs': "module.exports = require('y');",
+    });
+    add(`${dir}/node_modules/x`, z ? pkg('x', 1, "'x' + require('z')") : pkg('x', x, x));
+    if (z) add(`${dir}/node_modules/z`, pkg('z', z, `'z${z}'`));
+    add(`${dir}/node_modules/y`, pkg('y', y, y));
+  }
+  const entry = `console.log(JSON.stringify([${Object.keys(consumers).map(c => `require('${c}')`)}]));`;
+  files['src/package.json'] = JSON.stringify({ name: 'tree', private: true });
+  files['src/index.cjs'] = entry;
+  for (const [file, content] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(treeDir, file)), { recursive: true });
+    fs.writeFileSync(path.join(treeDir, file), content);
+  }
+  return standaloner({
+    input: path.join(treeDir, 'src/index.cjs'),
+    outDir: path.join(treeDir, 'out'),
+    bundle: false,
+    verbose: false,
+  }).then(() => {
+    fs.writeFileSync(path.join(treeDir, 'out/index.cjs'), entry);
+    const output = execSync('node out/index.cjs', { encoding: 'utf8', cwd: treeDir }).trim();
+    const shared = fs.readdirSync(path.join(treeDir, 'out/node_modules/.versions'));
+    const copies = shared.filter(d => d.startsWith('shared@')).length;
+    fs.rmSync(treeDir, { recursive: true });
+    if (output !== expected || copies !== 2) {
+      console.error(`✗ ${title}`);
+      console.error(`  Expected: ${expected} with 2 copies of shared`);
+      console.error(`  Got:      ${output} with ${copies} copies of shared`);
+      process.exit(1);
+    }
+    console.log(`✓ ${title}\n`);
+  });
+};
+const both = "[require('shared/x.cjs'), require('shared/y.cjs')]";
+await checkTree(
+  'Installs that load only one peer share a matching copy',
+  {
+    'parent-x': { x: 1, y: 2, loads: "require('shared/x.cjs')" },
+    'parent-y': { x: 2, y: 1, loads: "require('shared/y.cjs')" },
+    'parent-21': { x: 2, y: 1, loads: both },
+    'parent-12': { x: 1, y: 2, loads: both },
+  },
+  '[1,1,[2,1],[1,2]]'
+);
+// x splits by its own peer z, after shared's first grouping
+await checkTree(
+  'An install that loads only one peer shares a copy split one level down',
+  {
+    'parent-22': { z: 2, y: 2, loads: both },
+    'parent-11': { z: 1, y: 1, loads: both },
+    'parent-x': { z: 1, y: 2, loads: "require('shared/x.cjs')" },
+  },
+  '[["xz2",2],["xz1",1],"xz1"]'
+);
 
 console.log('=== All Peer Variants Tests Passed! ===');
