@@ -328,7 +328,7 @@ async function processTracedFiles(
   }
 
   const copyTasks: Promise<void>[] = [];
-  const topLevelSymlinkTasks: Array<{ source: string; target: string }> = []; // Links for newest versions in top-level node_modules
+  const topLevelSymlinkTasks: Array<{ source: string; target: string }> = []; // Top-level links of multi-version packages
   const multiVersionPackages: Record<string, Record<string, string[]>> = {}; // Track packages with multiple versions found
 
   // Process each package identified in the registry
@@ -347,8 +347,11 @@ async function processTracedFiles(
       multiVersionPackages[name] = versions;
       // Add package name to build summary instead of logging
       buildSummary.addPackageName(name);
-      // Sort versions newest first to easily identify the latest
-      const sortedVersions = versionEntries.sort(([v1], [v2]) => compareVersions(v1, v2));
+      // Sort versions newest first, a version's `<version>` copy before its `<version>_<n>` ones
+      const sortedVersions = versionEntries.sort(
+        ([v1], [v2]) =>
+          compareVersions(v1, v2) || Number(v1.includes('_')) - Number(v2.includes('_'))
+      );
 
       // Copy each version into the dedicated .versions directory
       for (const [version, files] of sortedVersions) {
@@ -378,7 +381,7 @@ async function processTracedFiles(
   });
 
   logVerbose('Creating top-level symlinks...');
-  // Finally, create the top-level symlinks for the newest versions of multi-version packages
+  // Finally, create the top-level symlinks of multi-version packages
   await Promise.all(topLevelSymlinkTasks.map(task => createSymlink(task.source, task.target)));
 }
 
