@@ -219,8 +219,7 @@ async function pnpResolve(
 /**
  * Names each workspace or portal: folder in the output as node_modules would: a name the app
  * imports it under, else its package.json name when it is imported by it, else its first import
- * name, made unique when another folder or an app's npm: alias took it. Its other import names
- * link to it.
+ * name, made unique when another folder took it. Its other import names link to it.
  */
 function nameLocalFolders(aliases: PnpAliases, dirNames: Map<string, string>): void {
   const imports = new Map<string, { names: Set<string>; appNames: Set<string>; ownName?: string }>();
@@ -234,13 +233,10 @@ function nameLocalFolders(aliases: PnpAliases, dirNames: Map<string, string>): v
   const isAppFile = (file: string) =>
     !file.includes(`${path.sep}node_modules${path.sep}`) &&
     !localDirs.some(dir => file.startsWith(dir + path.sep));
-  // The names the app imports npm: aliases under link to them, so no folder takes them
-  const taken = new Set<string>();
-  for (const { dir, local, alias, name, parent } of aliases.values()) {
-    if (!isAppFile(realpathSync(parent))) continue;
-    if (local) imports.get(dir)!.appNames.add(alias);
-    else if (alias !== name) taken.add(alias);
+  for (const { dir, local, alias, parent } of aliases.values()) {
+    if (local && isAppFile(realpathSync(parent))) imports.get(dir)!.appNames.add(alias);
   }
+  const taken = new Set<string>();
   const sorted = [...imports].sort(
     ([a, { appNames: appA }], [b, { appNames: appB }]) =>
       Number(appB.size > 0) - Number(appA.size > 0) || (a < b ? -1 : 1)
@@ -475,12 +471,19 @@ async function processTracedFiles(
   const copyTasks: Promise<void>[] = [];
   const topLevelSymlinkTasks: Array<{ source: string; target: string }> = []; // Links for newest versions in top-level node_modules
   const multiVersionPackages: Record<string, Record<string, string[]>> = {}; // Track packages with multiple versions found
+  // Under PnP the top-level name of an app's npm: alias links to the package it installs: a
+  // package with that name goes to .versions, linked from each of its importers
+  const appAliasNames = new Set(
+    [...pnpAliases.values()]
+      .filter(a => a.alias !== a.name && !tracedFiles[a.parent])
+      .map(a => a.alias)
+  );
 
   // Process each package identified in the registry
   for (const [name, versions] of Object.entries(packageRegistry)) {
     const versionEntries = Object.entries(versions);
 
-    if (versionEntries.length === 1) {
+    if (versionEntries.length === 1 && !appAliasNames.has(name)) {
       // --- Single version package ---
       const [, /*version*/ files] = versionEntries[0]!;
       const destDir = path.join(nodeModulesPath, name);
@@ -504,6 +507,7 @@ async function processTracedFiles(
         const destDir = path.join(versionsPath, `${name}@${version}`);
         copyTasks.push(copyPackageVersion(files, destDir, tracedFiles));
       }
+      if (appAliasNames.has(name)) continue;
 
       // Prepare to symlink the newest version (first after sort) to the main node_modules output,
       // or under PnP the one the app imports under this name
@@ -543,7 +547,6 @@ async function processTracedFiles(
     const version = dirVersions.get(dir);
     if (alias === name || !version) continue;
     const importer = tracedFiles[parent];
-    if (!importer && packageRegistry[alias]) continue;
     const target = importer
       ? path.join(outputDir(importer.pkgName, importer.pkgVersion), 'node_modules', alias)
       : path.join(nodeModulesPath, alias);
