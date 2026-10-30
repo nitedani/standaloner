@@ -130,7 +130,7 @@ async function trace({
       }
     }
   }
-  const copies = assignCopies(tracedFiles);
+  const copies = assignCopies(tracedFiles, pnpAliases);
   await addNativeBinaries(tracedFiles, copies);
 
   // Copy/link dependencies based on trace results
@@ -584,14 +584,31 @@ async function processTracedFiles(
  * `<version>_<n>` when folders of one name@version load different copies of a dependency
  * (by the very dependency folders they load if the grouping never settles).
  */
-function assignCopies(tracedFiles: Record<string, TracedFile>): Map<string, string> {
-  const deps = new Map<string, Map<string, string>>(); // pkgPathReal -> dependency name -> its pkgPathReal
+function assignCopies(
+  tracedFiles: Record<string, TracedFile>,
+  pnpAliases: PnpAliases
+): Map<string, string> {
+  const deps = new Map<string, Map<string, string>>(); // pkgPathReal -> import name -> its pkgPathReal
+  const load = (folder: string, name: string, dep: string) => {
+    if (!deps.has(folder)) deps.set(folder, new Map());
+    deps.get(folder)!.set(name, dep);
+  };
+  // Under PnP an import goes by its import name, as npm: aliases of one package can install it
+  // at different versions
+  const tracedDirs = new Set(Object.values(tracedFiles).map(file => file.pkgPathReal));
+  const pnpImports = new Set<string>();
+  for (const { parent, alias, dir } of pnpAliases.values()) {
+    const parentFile = tracedFiles[parent];
+    if (!parentFile || !tracedDirs.has(dir) || parentFile.pkgPathReal === dir) continue;
+    pnpImports.add(`${parent}\0${dir}`);
+    load(parentFile.pkgPathReal, alias, dir);
+  }
   for (const file of Object.values(tracedFiles)) {
     for (const parentPath of file.parents) {
       const parentFile = tracedFiles[parentPath];
       if (!parentFile || parentFile.pkgName === file.pkgName) continue;
-      if (!deps.has(parentFile.pkgPathReal)) deps.set(parentFile.pkgPathReal, new Map());
-      deps.get(parentFile.pkgPathReal)!.set(file.pkgName, file.pkgPathReal);
+      if (pnpImports.has(`${parentPath}\0${file.pkgPathReal}`)) continue;
+      load(parentFile.pkgPathReal, file.pkgName, file.pkgPathReal);
     }
   }
   // Folders that load more dependencies pick their copy first, so one that loads fewer joins a

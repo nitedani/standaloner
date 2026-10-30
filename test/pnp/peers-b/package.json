@@ -1,0 +1,10 @@
+{
+  "name": "peers-b",
+  "version": "1.0.0",
+  "main": "index.cjs",
+  "dependencies": {
+    "peers-host": "file:../peers-host",
+    "changing": "npm:lodash@4.17.21",
+    "fixed": "npm:lodash@3.10.1"
+  }
+}
