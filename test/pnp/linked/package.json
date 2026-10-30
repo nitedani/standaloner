@@ -1,0 +1,8 @@
+{
+  "name": "linked",
+  "version": "1.0.0",
+  "exports": {
+    "import": "./index.mjs",
+    "require": "./index.cjs"
+  }
+}
