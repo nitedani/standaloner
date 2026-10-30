@@ -1,6 +1,7 @@
 import path from 'node:path';
+import Module from 'node:module';
 import fs from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { platform } from 'node:os';
 import { nodeFileTrace, resolve as nftDefaultResolve, type NodeFileTraceResult } from '@vercel/nft';
 import { assert, toPosixPath } from './utils/utils.js';
@@ -90,13 +91,6 @@ async function trace({
   assert(input.length > 0, 'Input must be non-empty');
   logVerbose('Tracing package dependencies...');
 
-  // Check for unsupported PnP
-  try {
-    require('pnpapi');
-    logInfo('Warning: Yarn PnP detected, which is not supported. Skipping trace.');
-    return;
-  } catch {} // PnP not in use, proceed
-
   // Prepare output directories
   const nodeModulesPath = path.join(outDir, nodeModulesDir);
   const versionsPath = path.join(nodeModulesPath, versionsDir);
@@ -106,7 +100,8 @@ async function trace({
   });
 
   // Trace files and get package info
-  const tracedFiles = await traceProjectFiles(input, baseDir, outDir);
+  const pnpAliases: PnpAliases = new Map();
+  const tracedFiles = await traceProjectFiles(input, baseDir, outDir, pnpAliases);
 
   if (Object.keys(tracedFiles).length === 0) {
     logVerbose('No traceable package dependencies found.');
@@ -116,14 +111,14 @@ async function trace({
   // Pick up platform-specific optionalDependencies that nft can't resolve statically
   // (rollup, esbuild, sharp, @parcel/watcher, @node-rs/* etc. load their native binding
   // via a dynamic require keyed on process.platform/arch).
-  await traceOptionalDeps(tracedFiles, baseDir);
+  await traceOptionalDeps(tracedFiles, traceBaseFor(baseDir));
 
   // Pick up prebuilt native binaries that nft's static analysis misses
   // (node-gyp-build, prebuild-install, napi-rs — dynamic require by platform/arch).
   await addNativeBinaries(tracedFiles);
 
   // Copy/link dependencies based on trace results
-  await processTracedFiles(tracedFiles, { nodeModulesPath, versionsPath });
+  await processTracedFiles(tracedFiles, { nodeModulesPath, versionsPath, pnpAliases });
 
   // Record dependency statistics in build summary
   const packageRegistry: Record<string, Record<string, string[]>> = {};
@@ -148,13 +143,120 @@ async function trace({
   // Don't log here, the build summary will show the results
 }
 
+type PnpApi = { resolveToUnqualified(request: string, issuer: string): string | null };
+const findPnpApi = (Module as { findPnpApi?: (lookupSource: string) => PnpApi | null }).findPnpApi;
+
+/** Under Yarn PnP, packages live in zip archives outside the project (Yarn's global cache by default). */
+function traceBaseFor(baseDir: string): string {
+  return process.versions.pnp ? path.parse(baseDir).root : baseDir;
+}
+
+/** Under Yarn PnP, the folder of `pkgName` as `issuer` sees it (in Yarn's cache or unplugged). */
+function pnpPackageDir(pkgName: string, issuer: string): string | undefined {
+  try {
+    const pkgDir = findPnpApi?.(issuer)?.resolveToUnqualified(pkgName, issuer);
+    return pkgDir ? path.normalize(pkgDir).replace(/[\\/]+$/, '') : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Imports resolved under PnP, per importing file: the package's folder `dir`, whether it is a
+ * workspace or portal: folder (`local`, with its package.json name `ownName`), and the name of
+ * the package each installs.
+ */
+type PnpAliases = Map<
+  string,
+  { parent: string; alias: string; name: string; dir: string; local: boolean; ownName?: string }
+>;
+const LOCAL_VERSION_SUFFIX = '-local';
+
+/**
+ * Under Yarn PnP there is no node_modules tree for nft to walk: ask PnP for the package's
+ * folder and let nft's own resolver apply `exports` from a file next to it.
+ */
+async function pnpResolve(
+  id: string,
+  parent: string,
+  job: Parameters<typeof nftDefaultResolve>[2],
+  cjsResolve: boolean,
+  aliases: PnpAliases
+): Promise<string | string[] | undefined> {
+  const pkgName = id.split('/').slice(0, id.startsWith('@') ? 2 : 1).join('/');
+  const pkgDir = pnpPackageDir(pkgName, parent);
+  if (!pkgDir) return undefined;
+  const subpath = id.slice(pkgName.length);
+  const nodeModulesDir = pkgDir.lastIndexOf(path.sep + 'node_modules' + path.sep);
+  const dirName = pkgDir.slice(nodeModulesDir + 'node_modules'.length + 2).split(path.sep).join('/');
+  const inNodeModules =
+    nodeModulesDir !== -1 && dirName.split('/').length === (dirName.startsWith('@') ? 2 : 1);
+  const pkgJson = inNodeModules ? null : await readPkgJson(pkgDir);
+  if (!inNodeModules && !pkgJson) return undefined;
+  const key = `${parent}\0${pkgName}`;
+  if (inNodeModules) {
+    // An npm package's folder is named after it, an npm: alias's after the package it installs
+    aliases.set(key, { parent, alias: pkgName, name: dirName, dir: pkgDir, local: false });
+    const issuer = path.join(pkgDir.slice(0, nodeModulesDir), 'index.js');
+    return nftDefaultResolve(dirName + subpath, issuer, job, cjsResolve);
+  }
+  // A workspace, portal: or link: package has no node_modules folder above it: its name in
+  // the output is chosen once every import of it is known (nameLocalFolders)
+  const dir = realpathSync(pkgDir);
+  const ownName = pkgJson?.name;
+  aliases.set(key, { parent, alias: pkgName, name: '', dir, local: true, ownName });
+  // nft applies its `exports` as for the package importing itself, else resolves the path
+  // inside its folder
+  const selfIssuer = path.join(pkgDir, 'index.js');
+  return nftDefaultResolve((pkgJson?.name || pkgName) + subpath, selfIssuer, job, cjsResolve).catch(
+    () => nftDefaultResolve(pkgDir + subpath, parent, job, cjsResolve).catch(() => undefined)
+  );
+}
+
+/**
+ * Names each workspace or portal: folder in the output as node_modules would: a name the app
+ * imports it under, else its package.json name when it is imported by it, else its first import
+ * name, made unique when another folder took it. Its other import names link to it.
+ */
+function nameLocalFolders(aliases: PnpAliases, dirNames: Map<string, string>): void {
+  const imports = new Map<string, { names: Set<string>; appNames: Set<string>; ownName?: string }>();
+  for (const { dir, local, alias, ownName } of aliases.values()) {
+    if (!local) continue;
+    const folder = imports.get(dir) ?? { names: new Set(), appNames: new Set(), ownName };
+    imports.set(dir, folder);
+    folder.names.add(alias);
+  }
+  const localDirs = [...imports.keys()];
+  const isAppFile = (file: string) =>
+    !file.includes(`${path.sep}node_modules${path.sep}`) &&
+    !localDirs.some(dir => file.startsWith(dir + path.sep));
+  for (const { dir, local, alias, parent } of aliases.values()) {
+    if (local && isAppFile(realpathSync(parent))) imports.get(dir)!.appNames.add(alias);
+  }
+  const taken = new Set<string>();
+  const sorted = [...imports].sort(
+    ([a, { appNames: appA }], [b, { appNames: appB }]) =>
+      Number(appB.size > 0) - Number(appA.size > 0) || (a < b ? -1 : 1)
+  );
+  for (const [dir, { names, appNames, ownName }] of sorted) {
+    const candidates = appNames.size ? appNames : names;
+    const base = ownName && candidates.has(ownName) ? ownName : [...candidates].sort()[0]!;
+    let name = base;
+    for (let i = 2; taken.has(name); i++) name = `${base}~${i}`;
+    taken.add(name);
+    dirNames.set(dir, name);
+  }
+  for (const entry of aliases.values()) if (entry.local) entry.name = dirNames.get(entry.dir)!;
+}
+
 /**
  * Runs Node File Trace and processes results to build a map of dependency files with package metadata.
  */
 async function traceProjectFiles(
   entryFiles: string[],
   baseDir: string,
-  outDir: string
+  outDir: string,
+  pnpAliases: PnpAliases
 ): Promise<Record<string, TracedFile>> {
   // Warn loudly when the same external specifier resolves to different versions from
   // different importers. The bundler collapses externals to a single import in the output,
@@ -163,10 +265,13 @@ async function traceProjectFiles(
     await emitMultiVersionWarning(conflict, baseDir);
   }
 
+  const traceBase = traceBaseFor(baseDir);
+  const pnpDirNames = new Map<string, string>();
   const traceResults = await nodeFileTrace(entryFiles, {
-    base: baseDir,
-    // Default-first: let nft's own resolution run as today. Only on miss, try our captured
-    // phantom-dep map.
+    base: traceBase,
+    processCwd: baseDir,
+    // Default-first: let nft's own resolution run as today. Only on miss, try Yarn PnP, then
+    // our captured phantom-dep map.
     // When multiple versions are captured, pick the highest semver: the bundler has
     // already collapsed the external to a single runtime import, and shipping the newer
     // copy is generally safer (APIs are typically backwards-compatible).
@@ -174,21 +279,25 @@ async function traceProjectFiles(
       try {
         return await nftDefaultResolve(id, parent, job, cjsResolve);
       } catch (err) {
+        const pnpResolved = await pnpResolve(id, parent, job, cjsResolve, pnpAliases);
+        if (pnpResolved) return pnpResolved;
         const fallback = await pickLatestOrigin(id);
         if (fallback) return fallback;
         throw err;
       }
     },
   });
-  const relOutDir = path.relative(baseDir, outDir);
+  nameLocalFolders(pnpAliases, pnpDirNames);
+  const relOutDir = path.relative(traceBase, outDir);
 
   // Filter out NFT internals, entry points, system files, and files already in output
   const filesToProcess = [...traceResults.fileList].filter(file => {
     const reason = traceResults.reasons.get(file);
-    // Exclude initial files, system paths, and anything already inside the target output dir
+    // Exclude initial files, system paths, and anything already inside the target output dir.
+    // Not /usr under PnP: Yarn's folders can be there, and files outside any package are skipped below.
     return !(
       reason?.type.includes('initial') ||
-      file.startsWith('usr/') ||
+      (!process.versions.pnp && file.startsWith('usr/')) ||
       file.startsWith(relOutDir)
     );
   });
@@ -201,7 +310,7 @@ async function traceProjectFiles(
   for (let i = 0; i < filesToProcess.length; i += batchSize) {
     const batch = filesToProcess.slice(i, i + batchSize);
     const results = await Promise.all(
-      batch.map(file => processSingleFile(file, traceResults, baseDir))
+      batch.map(file => processSingleFile(file, traceResults, traceBase, pnpDirNames))
     );
     // Add successfully processed files (those associated with a package) to the map
     for (const result of results) {
@@ -222,7 +331,8 @@ async function traceProjectFiles(
 async function processSingleFile(
   fileRelativePath: string,
   traceResults: NodeFileTraceResult,
-  baseDir: string
+  baseDir: string,
+  pnpDirNames: Map<string, string>
 ): Promise<TracedFile | null> {
   const posixPath = toPosixPath(fileRelativePath);
   const fullPath = path.join(baseDir, posixPath);
@@ -245,7 +355,7 @@ async function processSingleFile(
 
     const pkgInfo = posixPath.includes('node_modules/')
       ? await resolveNodeModulesPackage(posixPath, baseDir)
-      : await resolveWorkspacePackage(realPath, baseDir);
+      : await resolveWorkspacePackage(realPath, baseDir, pnpDirNames);
     if (!pkgInfo) return null;
     return { ...baseInfo, ...pkgInfo };
   } catch (error: any) {
@@ -260,18 +370,27 @@ async function processSingleFile(
  */
 async function resolveWorkspacePackage(
   absoluteFilePath: string,
-  baseDir: string
+  baseDir: string,
+  pnpDirNames: Map<string, string>
 ): Promise<PkgInfo | null> {
-  const found = await readContainingPkgJson(absoluteFilePath);
+  // Under PnP a local folder's root is known: a nested package.json, such as a build folder's
+  // {"type":"module"}, doesn't start another package
+  const pnpRoot = [...pnpDirNames.keys()]
+    .filter(dir => absoluteFilePath.startsWith(dir + path.sep))
+    .sort((a, b) => b.length - a.length)[0];
+  const pnpPkgJson = pnpRoot && (await readPkgJson(pnpRoot));
+  const found = pnpPkgJson
+    ? { root: pnpRoot, pkgJson: pnpPkgJson }
+    : await readContainingPkgJson(absoluteFilePath);
   if (!found) return null;
   const { root: pkgRoot, pkgJson } = found;
 
-  if (!pkgJson.name) {
+  const pkgName = pnpDirNames.get(pkgRoot) || pkgJson.name;
+  if (!pkgName) {
     logWarning(`Workspace package at ${pkgRoot} skipped: missing name.`);
     return null;
   }
 
-  const pkgName = pkgJson.name;
   const pkgVersion = pkgJson.version || DEFAULT_VERSION;
   const pkgPath = path.relative(baseDir, pkgRoot); // relative to the tracing base directory
   const pkgPathReal = pkgRoot; // already canonical (walked from a realpath)
@@ -314,8 +433,28 @@ async function resolveNodeModulesPackage(
  */
 async function processTracedFiles(
   tracedFiles: Record<string, TracedFile>,
-  { nodeModulesPath, versionsPath }: { nodeModulesPath: string; versionsPath: string }
+  {
+    nodeModulesPath,
+    versionsPath,
+    pnpAliases,
+  }: { nodeModulesPath: string; versionsPath: string; pnpAliases: PnpAliases }
 ): Promise<void> {
+  // Under PnP a workspace or portal: folder can have the name and version of an npm package (a
+  // fork that kept both): it gets a version of its own, so each importer keeps its copy
+  const isLocal = (file: TracedFile) =>
+    !file.pkgPathReal.includes(`${path.sep}node_modules${path.sep}`);
+  if (process.versions.pnp) {
+    const files = Object.values(tracedFiles);
+    const npmKeys = new Set(
+      files.filter(f => !isLocal(f)).map(f => `${f.pkgName}@${f.pkgVersion}`)
+    );
+    for (const file of files) {
+      if (isLocal(file) && npmKeys.has(`${file.pkgName}@${file.pkgVersion}`)) {
+        file.pkgVersion += LOCAL_VERSION_SUFFIX;
+      }
+    }
+  }
+
   // Group files by package name and version for easier processing
   const packageRegistry: Record<string, Record<string, string[]>> = {}; // { [pkgName]: { [version]: [filePath, ...] } }
   for (const file of Object.values(tracedFiles)) {
@@ -325,15 +464,23 @@ async function processTracedFiles(
     packageRegistry[file.pkgName]![file.pkgVersion]!.push(file.path);
   }
 
+  const dirVersions = new Map(Object.values(tracedFiles).map(f => [f.pkgPathReal, f.pkgVersion]));
   const copyTasks: Promise<void>[] = [];
   const topLevelSymlinkTasks: Array<{ source: string; target: string }> = []; // Links for newest versions in top-level node_modules
   const multiVersionPackages: Record<string, Record<string, string[]>> = {}; // Track packages with multiple versions found
+  // Under PnP the top-level name of an app's npm: alias links to the package it installs: a
+  // package with that name goes to .versions, linked from each of its importers
+  const appAliasNames = new Set(
+    [...pnpAliases.values()]
+      .filter(a => a.alias !== a.name && !tracedFiles[a.parent])
+      .map(a => a.alias)
+  );
 
   // Process each package identified in the registry
   for (const [name, versions] of Object.entries(packageRegistry)) {
     const versionEntries = Object.entries(versions);
 
-    if (versionEntries.length === 1) {
+    if (versionEntries.length === 1 && !appAliasNames.has(name)) {
       // --- Single version package ---
       const [, /*version*/ files] = versionEntries[0]!;
       const destDir = path.join(nodeModulesPath, name);
@@ -346,16 +493,26 @@ async function processTracedFiles(
       // Add package name to build summary instead of logging
       buildSummary.addPackageName(name);
       // Sort versions newest first to easily identify the latest
-      const sortedVersions = versionEntries.sort(([v1], [v2]) => compareVersions(v1, v2));
+      // A local fork sorts after the npm package of its version
+      const isFork = (version: string) => Number(version.endsWith(LOCAL_VERSION_SUFFIX));
+      const sortedVersions = versionEntries.sort(
+        ([v1], [v2]) => compareVersions(v1, v2) || isFork(v1) - isFork(v2)
+      );
 
       // Copy each version into the dedicated .versions directory
       for (const [version, files] of sortedVersions) {
         const destDir = path.join(versionsPath, `${name}@${version}`);
         copyTasks.push(copyPackageVersion(files, destDir, tracedFiles));
       }
+      if (appAliasNames.has(name)) continue;
 
-      // Prepare to symlink the newest version (first after sort) to the main node_modules output
-      const [newestVersionStr] = sortedVersions[0]!;
+      // Prepare to symlink the newest version (first after sort) to the main node_modules output,
+      // or under PnP the one the app imports under this name
+      const appImport = [...pnpAliases.values()].find(
+        a => a.alias === name && a.name === name && !tracedFiles[a.parent]
+      );
+      const newestVersionStr =
+        (appImport && dirVersions.get(appImport.dir)) ?? sortedVersions[0]![0];
       topLevelSymlinkTasks.push({
         source: path.join(versionsPath, `${name}@${newestVersionStr}`), // Source is in .versions
         target: path.join(nodeModulesPath, name), // Target is in top-level node_modules
@@ -376,6 +533,22 @@ async function processTracedFiles(
   logVerbose('Creating top-level symlinks...');
   // Finally, create the top-level symlinks for the newest versions of multi-version packages
   await Promise.all(topLevelSymlinkTasks.map(task => createSymlink(task.source, task.target)));
+
+  // Under PnP an npm: alias was traced under the name of the package it installs: link it
+  // where its importer looks it up
+  const outputDir = (name: string, version: string) =>
+    multiVersionPackages[name]
+      ? path.join(versionsPath, `${name}@${version}`)
+      : path.join(nodeModulesPath, name);
+  for (const { parent, alias, name, dir } of pnpAliases.values()) {
+    const version = dirVersions.get(dir);
+    if (alias === name || !version) continue;
+    const importer = tracedFiles[parent];
+    const target = importer
+      ? path.join(outputDir(importer.pkgName, importer.pkgVersion), 'node_modules', alias)
+      : path.join(nodeModulesPath, alias);
+    await createSymlink(outputDir(name, version), target);
+  }
 }
 
 /**
@@ -650,6 +823,8 @@ async function findOptionalDepRoot(
   depName: string,
   parentFile: string
 ): Promise<string | null> {
+  const pnpDir = pnpPackageDir(depName, parentFile);
+  if (pnpDir) return existsSync(path.join(pnpDir, 'package.json')) ? pnpDir : null;
   let current = path.dirname(parentFile);
   while (true) {
     const candidate = path.join(current, 'node_modules', depName);

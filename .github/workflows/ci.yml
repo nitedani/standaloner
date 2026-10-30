@@ -38,3 +38,7 @@ jobs:
       - name: Run asset detection test
         working-directory: test/assets
         run: node test.js
+
+      - name: Run Yarn PnP test
+        working-directory: test/pnp
+        run: node test.js

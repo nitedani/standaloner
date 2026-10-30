@@ -3,7 +3,7 @@ import type { CallExpression, MemberExpression, NewExpression, Node, Program } f
 import { walk } from 'estree-walker';
 import MagicString from 'magic-string';
 import fs from 'node:fs';
-import { createRequire } from 'node:module';
+import Module, { createRequire } from 'node:module';
 import path from 'node:path';
 import type { PluginContext, SourceMapInput } from 'rollup';
 import type { Plugin } from 'vite';
@@ -18,12 +18,36 @@ interface AssetRelocatorOptions {
 
 const require = createRequire(import.meta.url);
 
+type PnpApi = {
+  resolveRequest(request: string, issuer: string, opts: { conditions: Set<string> }): string | null;
+};
+const findPnpApi = (Module as { findPnpApi?: (lookupSource: string) => PnpApi | null }).findPnpApi;
+
+/** Rolldown says what kind of import it resolves; Vite and Rollup don't */
+const isImport = (kind?: string) => kind !== undefined && kind !== 'require-call';
+
 const safeRequireResolve = (
   request: string,
-  options?: { paths?: string[] | undefined }
+  importer?: string,
+  esm = false
 ): string | undefined => {
   try {
-    return toPosixPath(require.resolve(request, options));
+    let req = require;
+    if (importer) {
+      let cleanedImporter = importer;
+      if (cleanedImporter.startsWith('\0')) cleanedImporter = cleanedImporter.slice(1);
+      cleanedImporter = cleanedImporter.replace(/[?#].*$/, '');
+      if (path.isAbsolute(cleanedImporter)) {
+        // require.resolve applies `require` exports: under PnP an import asks Yarn for `import`
+        const pnp = esm && process.versions.pnp ? findPnpApi?.(cleanedImporter) : undefined;
+        const resolved = pnp?.resolveRequest(request, cleanedImporter, {
+          conditions: new Set(['node', 'import']),
+        });
+        if (resolved) return toPosixPath(resolved);
+        req = createRequire(cleanedImporter);
+      }
+    }
+    return toPosixPath(req.resolve(request));
   } catch {
     return undefined;
   }
@@ -111,7 +135,10 @@ export function assetRelocatorPlugin(options: AssetRelocatorOptions = {}): Plugi
     },
 
     async resolveId(source, importer, options) {
-      return (await this.resolve(source, importer, options)) || safeRequireResolve(source);
+      return (
+        (await this.resolve(source, importer, options)) ||
+        safeRequireResolve(source, importer, isImport((options as { kind?: string }).kind))
+      );
     },
 
     async load(id: string) {
@@ -394,7 +421,7 @@ function findFileReferences(ast: Program, dirName: string, sourceId: string): Fi
       } else if (isPathJoinOperation(node)) {
         ref = processPathJoinOperation(node as CallExpression, dirName);
       } else if (isRequireCall(node)) {
-        ref = processRequireCall(node as CallExpression, dirName);
+        ref = processRequireCall(node as CallExpression, dirName, sourceId);
       } else if (isFsOperation(node)) {
         ref = processFsOperation(node as CallExpression, dirName);
       }
@@ -574,7 +601,7 @@ function isRequireCall(node: Node): node is CallExpression {
 }
 
 /** Process require() call */
-function processRequireCall(node: CallExpression, dirName: string): FileReference[] | null {
+function processRequireCall(node: CallExpression, dirName: string, sourceId: string): FileReference[] | null {
   const arg = node.arguments[0];
   if (!arg) return null;
 
@@ -586,7 +613,7 @@ function processRequireCall(node: CallExpression, dirName: string): FileReferenc
   }
   if (!modulePath) return null;
 
-  const resolved = safeRequireResolve(modulePath);
+  const resolved = safeRequireResolve(modulePath, sourceId);
   const potentialPath = resolved || path.resolve(dirName, modulePath);
   const ext = path.extname(potentialPath).toLowerCase();
   if (['.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.json', ''].includes(ext)) return null;
@@ -602,7 +629,7 @@ function processRequireCall(node: CallExpression, dirName: string): FileReferenc
   return [
     {
       node: arg,
-      path: modulePath,
+      path: potentialPath,
       transformInfo: {
         type: 'require',
         start: node.start,
