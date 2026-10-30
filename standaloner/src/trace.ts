@@ -595,11 +595,13 @@ function assignCopies(
   };
   // Under PnP an import goes by its import name, as npm: aliases of one package can install it
   // at different versions
-  const tracedDirs = new Set(Object.values(tracedFiles).map(file => file.pkgPathReal));
+  const packageOf = new Map(
+    Object.values(tracedFiles).map(file => [file.pkgPathReal, file.pkgName])
+  );
   const pnpImports = new Set<string>();
   for (const { parent, alias, dir } of pnpAliases.values()) {
     const parentFile = tracedFiles[parent];
-    if (!parentFile || !tracedDirs.has(dir) || parentFile.pkgPathReal === dir) continue;
+    if (!parentFile || !packageOf.has(dir) || parentFile.pkgPathReal === dir) continue;
     pnpImports.add(`${parent}\0${dir}`);
     load(parentFile.pkgPathReal, alias, dir);
   }
@@ -629,7 +631,7 @@ function assignCopies(
       const group = groups.get(`${pkgName}@${pkgVersion}`) ?? [];
       groups.set(`${pkgName}@${pkgVersion}`, group);
       const loads = [...(deps.get(folder) ?? [])].map(
-        ([name, dep]) => [name, copies.get(dep)!] as const
+        ([name, dep]) => [name, `${packageOf.get(dep)}@${copies.get(dep)}`] as const
       );
       let n = group.findIndex(copy =>
         loads.every(([name, dep]) => (copy.get(name) ?? dep) === dep)

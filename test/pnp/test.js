@@ -26,7 +26,7 @@ try {
   );
   fs.writeFileSync(path.join(tmpDir, 'yarn.lock'), '');
 
-  console.log('Installing dependencies (lodash4, lodash, esbuild, dual, cjs-parent, linked, linked-renamed, dual-fork, fork-user, linked-bundled, uses-a, uses-b, utils, utils-a-renamed, nested-type, uses-lodash4, ms, uses-ms, alias-v3, alias-v4, peers-a, peers-b, local standaloner)...');
+  console.log('Installing dependencies (lodash4, lodash, esbuild, dual, cjs-parent, linked, linked-renamed, dual-fork, fork-user, linked-bundled, uses-a, uses-b, utils, utils-a-renamed, nested-type, uses-lodash4, ms, uses-ms, alias-v3, alias-v4, peers-a, peers-b, peers-c, local standaloner)...');
   execFileSync(
     'corepack',
     [
@@ -44,9 +44,10 @@ try {
       `alias-v3@${fileDep(path.join(__dirname, 'alias-v3'))}`,
       `alias-v4@${fileDep(path.join(__dirname, 'alias-v4'))}`,
       // each installs peers-host with its peers changing and fixed, npm: aliases of lodash 3 and 4
-      // the other way round
+      // the other way round, and for peers-c of lodash 3 and lodash-es 4
       `peers-a@${fileDep(path.join(__dirname, 'peers-a'))}`,
       `peers-b@${fileDep(path.join(__dirname, 'peers-b'))}`,
+      `peers-c@${fileDep(path.join(__dirname, 'peers-c'))}`,
       // portal: keeps the package outside any node_modules folder, as for a workspace
       `linked@portal:${path.join(__dirname, 'linked').replace(/\\/g, '/')}`,
       // its package.json says it is dual 1.0.0, like the real dual
@@ -100,13 +101,14 @@ import v3 from 'alias-v3';
 import v4 from 'alias-v4';
 import peersA from 'peers-a';
 import peersB from 'peers-b';
-console.log(format(_.defaults({ a: 1 }, { a: 3, b: 2 })), transformSync('let a = 1').code.trim(), cjsParent, lodashFork.VERSION, linked, renamed, bundled, fork, forkUser, usesA + usesB, utils, utilsA, nestedType, usesLodash4, msAlias.VERSION, usesMs, v3, v4, peersA, peersB);
+import peersC from 'peers-c';
+console.log(format(_.defaults({ a: 1 }, { a: 3, b: 2 })), transformSync('let a = 1').code.trim(), cjsParent, lodashFork.VERSION, linked, renamed, bundled, fork, forkUser, usesA + usesB, utils, utilsA, nestedType, usesLodash4, msAlias.VERSION, usesMs, v3, v4, peersA, peersB, peersC);
 `
   );
   fs.writeFileSync(
     path.join(tmpDir, 'build.js'),
     `import standaloner from 'standaloner';
-await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lodash4', 'lodash', 'esbuild', 'dual', 'cjs-parent', 'linked', 'linked-renamed', 'dual-fork', 'fork-user', 'uses-a', 'uses-b', 'utils', 'utils-a-renamed', 'nested-type', 'uses-lodash4', 'ms', 'uses-ms', 'alias-v3', 'alias-v4', 'peers-a', 'peers-b'] } });
+await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lodash4', 'lodash', 'esbuild', 'dual', 'cjs-parent', 'linked', 'linked-renamed', 'dual-fork', 'fork-user', 'uses-a', 'uses-b', 'utils', 'utils-a-renamed', 'nested-type', 'uses-lodash4', 'ms', 'uses-ms', 'alias-v3', 'alias-v4', 'peers-a', 'peers-b', 'peers-c'] } });
 `
   );
 
@@ -119,7 +121,7 @@ await standaloner({ input: 'index.js', outDir: 'dist', bundle: { external: ['lod
   }).toString();
   console.log('Output:', output.trim());
 
-  const expected = 'esm {"a":1,"b":2} let a = 1; cjs "cjs-parent" lodash-fork linked esm linked esm linked esm fork local "fork-user" AB B A nested-type lodash4-local 4.17.21 1s 3.10.1 4.17.21 3.10.1+4.17.21 4.17.21+3.10.1';
+  const expected = 'esm {"a":1,"b":2} let a = 1; cjs "cjs-parent" lodash-fork linked esm linked esm linked esm fork local "fork-user" AB B A nested-type lodash4-local 4.17.21 1s 3.10.1 4.17.21 lodash@3.10.1+lodash@4.17.21 lodash@4.17.21+lodash@3.10.1 lodash@3.10.1+lodash-es@4.17.21';
   if (output.trim() !== expected) {
     throw new Error(`Expected '${expected}', got '${output.trim()}'`);
   }
