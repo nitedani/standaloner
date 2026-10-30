@@ -18,7 +18,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -37,6 +37,10 @@ jobs:
 
       - name: Run asset detection test
         working-directory: test/assets
+        run: node test.js
+
+      - name: Run peer variants test
+        working-directory: test/peers
         run: node test.js
 
       - name: Run Yarn PnP test

@@ -1,0 +1,16 @@
+{
+  "name": "test-peers",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node test.js"
+  },
+  "dependencies": {
+    "peer-dep": "file:./packages/dep-1",
+    "peer-typed": "file:./packages/typed",
+    "peer-user": "file:./packages/user",
+    "peer-wrapper": "file:./packages/wrapper",
+    "standaloner": "workspace:*"
+  }
+}

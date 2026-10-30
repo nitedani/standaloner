@@ -115,10 +115,26 @@ async function trace({
 
   // Pick up prebuilt native binaries that nft's static analysis misses
   // (node-gyp-build, prebuild-install, napi-rs — dynamic require by platform/arch).
-  await addNativeBinaries(tracedFiles);
+  // Under PnP a workspace or portal: folder can have the name and version of an npm package (a
+  // fork that kept both): it gets a version of its own, so each importer keeps its copy
+  if (process.versions.pnp) {
+    const isLocal = (file: TracedFile) =>
+      !file.pkgPathReal.includes(`${path.sep}node_modules${path.sep}`);
+    const files = Object.values(tracedFiles);
+    const npmKeys = new Set(
+      files.filter(f => !isLocal(f)).map(f => `${f.pkgName}@${f.pkgVersion}`)
+    );
+    for (const file of files) {
+      if (isLocal(file) && npmKeys.has(`${file.pkgName}@${file.pkgVersion}`)) {
+        file.pkgVersion += LOCAL_VERSION_SUFFIX;
+      }
+    }
+  }
+  const copies = assignCopies(tracedFiles, pnpAliases);
+  await addNativeBinaries(tracedFiles, copies);
 
   // Copy/link dependencies based on trace results
-  await processTracedFiles(tracedFiles, { nodeModulesPath, versionsPath, pnpAliases });
+  await processTracedFiles(tracedFiles, copies, { nodeModulesPath, versionsPath, pnpAliases });
 
   // Record dependency statistics in build summary
   const packageRegistry: Record<string, Record<string, string[]>> = {};
@@ -433,40 +449,44 @@ async function resolveNodeModulesPackage(
  */
 async function processTracedFiles(
   tracedFiles: Record<string, TracedFile>,
+  copies: Map<string, string>, // pkgPathReal -> output copy (assignCopies)
   {
     nodeModulesPath,
     versionsPath,
     pnpAliases,
   }: { nodeModulesPath: string; versionsPath: string; pnpAliases: PnpAliases }
 ): Promise<void> {
-  // Under PnP a workspace or portal: folder can have the name and version of an npm package (a
-  // fork that kept both): it gets a version of its own, so each importer keeps its copy
-  const isLocal = (file: TracedFile) =>
-    !file.pkgPathReal.includes(`${path.sep}node_modules${path.sep}`);
-  if (process.versions.pnp) {
-    const files = Object.values(tracedFiles);
-    const npmKeys = new Set(
-      files.filter(f => !isLocal(f)).map(f => `${f.pkgName}@${f.pkgVersion}`)
-    );
-    for (const file of files) {
-      if (isLocal(file) && npmKeys.has(`${file.pkgName}@${file.pkgVersion}`)) {
-        file.pkgVersion += LOCAL_VERSION_SUFFIX;
-      }
-    }
-  }
-
-  // Group files by package name and version for easier processing
-  const packageRegistry: Record<string, Record<string, string[]>> = {}; // { [pkgName]: { [version]: [filePath, ...] } }
+  // Group files by package name and output copy for easier processing
+  const packageRegistry: Record<string, Record<string, string[]>> = {}; // { [pkgName]: { [copy]: [filePath, ...] } }
   for (const file of Object.values(tracedFiles)) {
     // Assumes file processing already filtered out non-package files
+    const copy = copies.get(file.pkgPathReal)!;
     packageRegistry[file.pkgName] ??= {};
-    packageRegistry[file.pkgName]![file.pkgVersion] ??= [];
-    packageRegistry[file.pkgName]![file.pkgVersion]!.push(file.path);
+    packageRegistry[file.pkgName]![copy] ??= [];
+    packageRegistry[file.pkgName]![copy]!.push(file.path);
   }
 
-  const dirVersions = new Map(Object.values(tracedFiles).map(f => [f.pkgPathReal, f.pkgVersion]));
+  // The app's own files: the entry files, and the other files of the package they sit in,
+  // found as processSingleFile finds a traced file's package
+  const entries = new Set(
+    Object.values(tracedFiles).flatMap(file => file.parents.filter(parent => !tracedFiles[parent]))
+  );
+  const appPackages = new Set(
+    await Promise.all(
+      [...entries].map(async entry => {
+        const match = NODE_MODULES_RE.exec(toPosixPath(entry));
+        if (!match)
+          return searchForPackageRoot(path.dirname(await fs.realpath(entry).catch(() => entry)));
+        const root = path.join(match[1]!, match[2]!);
+        return fs.realpath(root).catch(() => root);
+      })
+    )
+  );
+  const isAppFile = (file: string) =>
+    !tracedFiles[file] || appPackages.has(tracedFiles[file]!.pkgPathReal);
+
   const copyTasks: Promise<void>[] = [];
-  const topLevelSymlinkTasks: Array<{ source: string; target: string }> = []; // Links for newest versions in top-level node_modules
+  const topLevelSymlinkTasks: Array<{ source: string; target: string }> = []; // Top-level links of multi-version packages
   const multiVersionPackages: Record<string, Record<string, string[]>> = {}; // Track packages with multiple versions found
   // Under PnP the top-level name of an app's npm: alias links to the package it installs: a
   // package with that name goes to .versions, linked from each of its importers
@@ -492,11 +512,12 @@ async function processTracedFiles(
       multiVersionPackages[name] = versions;
       // Add package name to build summary instead of logging
       buildSummary.addPackageName(name);
-      // Sort versions newest first to easily identify the latest
-      // A local fork sorts after the npm package of its version
-      const isFork = (version: string) => Number(version.endsWith(LOCAL_VERSION_SUFFIX));
+      // Sort versions newest first, a local fork after the npm package of its version, then by
+      // name, so `<version>` comes before `<version>_<n>`
+      const isFork = (copy: string) =>
+        Number(copy.replace(/_\d+$/, '').endsWith(LOCAL_VERSION_SUFFIX));
       const sortedVersions = versionEntries.sort(
-        ([v1], [v2]) => compareVersions(v1, v2) || isFork(v1) - isFork(v2)
+        ([v1], [v2]) => compareVersions(v1, v2) || isFork(v1) - isFork(v2) || (v1 < v2 ? -1 : 1)
       );
 
       // Copy each version into the dedicated .versions directory
@@ -506,15 +527,18 @@ async function processTracedFiles(
       }
       if (appAliasNames.has(name)) continue;
 
-      // Prepare to symlink the newest version (first after sort) to the main node_modules output,
-      // or under PnP the one the app imports under this name
+      // The top level links to the copy the app imports under this name under PnP, else to the one
+      // the app's own files import, else to the newest version
       const appImport = [...pnpAliases.values()].find(
         a => a.alias === name && a.name === name && !tracedFiles[a.parent]
       );
-      const newestVersionStr =
-        (appImport && dirVersions.get(appImport.dir)) ?? sortedVersions[0]![0];
+      const appImports = ([, files]: [string, string[]]) =>
+        files.some(file => tracedFiles[file]!.parents.some(isAppFile));
+      const topLevelVersion =
+        (appImport && copies.get(appImport.dir)) ??
+        (sortedVersions.find(appImports) ?? sortedVersions[0]!)[0];
       topLevelSymlinkTasks.push({
-        source: path.join(versionsPath, `${name}@${newestVersionStr}`), // Source is in .versions
+        source: path.join(versionsPath, `${name}@${topLevelVersion}`), // Source is in .versions
         target: path.join(nodeModulesPath, name), // Target is in top-level node_modules
       });
     }
@@ -525,13 +549,13 @@ async function processTracedFiles(
 
   logVerbose('Creating dependency symlinks...');
   // Create necessary symlinks *between* packages for multi-version resolution
-  await createDependencySymlinks(tracedFiles, multiVersionPackages, {
+  await createDependencySymlinks(tracedFiles, copies, multiVersionPackages, {
     nodeModulesPath,
     versionsPath,
   });
 
   logVerbose('Creating top-level symlinks...');
-  // Finally, create the top-level symlinks for the newest versions of multi-version packages
+  // Finally, create the top-level symlinks of multi-version packages
   await Promise.all(topLevelSymlinkTasks.map(task => createSymlink(task.source, task.target)));
 
   // Under PnP an npm: alias was traced under the name of the package it installs: link it
@@ -541,14 +565,98 @@ async function processTracedFiles(
       ? path.join(versionsPath, `${name}@${version}`)
       : path.join(nodeModulesPath, name);
   for (const { parent, alias, name, dir } of pnpAliases.values()) {
-    const version = dirVersions.get(dir);
+    const version = copies.get(dir);
     if (alias === name || !version) continue;
     const importer = tracedFiles[parent];
     const target = importer
-      ? path.join(outputDir(importer.pkgName, importer.pkgVersion), 'node_modules', alias)
+      ? path.join(
+          outputDir(importer.pkgName, copies.get(importer.pkgPathReal)!),
+          'node_modules',
+          alias
+        )
       : path.join(nodeModulesPath, alias);
     await createSymlink(outputDir(name, version), target);
   }
+}
+
+/**
+ * Maps each traced package folder (pkgPathReal) to its output copy: `<version>`, or
+ * `<version>_<n>` when folders of one name@version load different copies of a dependency
+ * (by the very dependency folders they load if the grouping never settles).
+ */
+function assignCopies(
+  tracedFiles: Record<string, TracedFile>,
+  pnpAliases: PnpAliases
+): Map<string, string> {
+  const deps = new Map<string, Map<string, string>>(); // pkgPathReal -> import name -> its pkgPathReal
+  const load = (folder: string, name: string, dep: string) => {
+    if (!deps.has(folder)) deps.set(folder, new Map());
+    deps.get(folder)!.set(name, dep);
+  };
+  // Under PnP an import goes by its import name, as npm: aliases of one package can install it
+  // at different versions
+  const packageOf = new Map(
+    Object.values(tracedFiles).map(file => [file.pkgPathReal, file.pkgName])
+  );
+  const pnpImports = new Set<string>();
+  for (const { parent, alias, dir } of pnpAliases.values()) {
+    const parentFile = tracedFiles[parent];
+    if (!parentFile || !packageOf.has(dir) || parentFile.pkgPathReal === dir) continue;
+    pnpImports.add(`${parent}\0${dir}`);
+    load(parentFile.pkgPathReal, alias, dir);
+  }
+  for (const file of Object.values(tracedFiles)) {
+    for (const parentPath of file.parents) {
+      const parentFile = tracedFiles[parentPath];
+      if (!parentFile || parentFile.pkgName === file.pkgName) continue;
+      if (pnpImports.has(`${parentPath}\0${file.pkgPathReal}`)) continue;
+      load(parentFile.pkgPathReal, file.pkgName, file.pkgPathReal);
+    }
+  }
+  // Folders that load more dependencies pick their copy first, so one that loads fewer joins a
+  // matching copy instead of opening one of its own. Paths break ties, so every build names
+  // copies alike.
+  const loadCount = (folder: string) => deps.get(folder)?.size ?? 0;
+  const folders = uniquePackages(tracedFiles, file => file.pkgPathReal).sort(
+    ({ pkgPathReal: a }, { pkgPathReal: b }) => loadCount(b) - loadCount(a) || a.localeCompare(b)
+  );
+
+  // Each pass groups every name@version anew, by the copies its dependencies got in the pass
+  // before, until a pass changes nothing
+  let copies = new Map(folders.map(({ pkgPathReal, pkgVersion }) => [pkgPathReal, pkgVersion]));
+  for (let pass = 0; pass <= folders.length; pass++) {
+    const next = new Map<string, string>();
+    const groups = new Map<string, Array<Map<string, string>>>(); // name@version -> each copy's loads
+    for (const { pkgPathReal: folder, pkgName, pkgVersion } of folders) {
+      const group = groups.get(`${pkgName}@${pkgVersion}`) ?? [];
+      groups.set(`${pkgName}@${pkgVersion}`, group);
+      const loads = [...(deps.get(folder) ?? [])].map(
+        ([name, dep]) => [name, `${packageOf.get(dep)}@${copies.get(dep)}`] as const
+      );
+      let n = group.findIndex(copy =>
+        loads.every(([name, dep]) => (copy.get(name) ?? dep) === dep)
+      );
+      if (n === -1) n = group.push(new Map()) - 1;
+      for (const [name, dep] of loads) group[n]!.set(name, dep);
+      next.set(folder, n ? `${pkgVersion}_${n}` : pkgVersion);
+    }
+    if (folders.every(({ pkgPathReal }) => next.get(pkgPathReal) === copies.get(pkgPathReal))) {
+      return copies;
+    }
+    copies = next;
+  }
+  // No pass settled: folders that load the very same dependency folders share a copy
+  const fallback = new Map<string, Map<string, number>>(); // name@version -> loads -> copy number
+  return new Map(
+    folders.map(({ pkgPathReal: folder, pkgName, pkgVersion }) => {
+      const group = fallback.get(`${pkgName}@${pkgVersion}`) ?? new Map<string, number>();
+      fallback.set(`${pkgName}@${pkgVersion}`, group);
+      const loads = JSON.stringify([...(deps.get(folder) ?? [])].sort());
+      if (!group.has(loads)) group.set(loads, group.size);
+      const n = group.get(loads)!;
+      return [folder, n ? `${pkgVersion}_${n}` : pkgVersion];
+    })
+  );
 }
 
 /**
@@ -625,7 +733,8 @@ async function copyPackageVersion(
  */
 async function createDependencySymlinks(
   tracedFiles: Record<string, TracedFile>,
-  multiVersionPackages: Record<string, Record<string, string[]>>, // Pkgs with >1 version traced
+  copies: Map<string, string>, // pkgPathReal -> output copy
+  multiVersionPackages: Record<string, Record<string, string[]>>, // Pkgs with >1 copy traced
   { nodeModulesPath, versionsPath }: { nodeModulesPath: string; versionsPath: string }
 ): Promise<void> {
   // Use a Map to store symlink tasks (target -> source), automatically handling duplicates
@@ -648,7 +757,7 @@ async function createDependencySymlinks(
       ) {
         // Determine the output directory of the *parent* package
         const parentPackageOutputDir = multiVersionPackages[parentFile.pkgName]
-          ? path.join(versionsPath, `${parentFile.pkgName}@${parentFile.pkgVersion}`) // Parent is also multi-version
+          ? path.join(versionsPath, `${parentFile.pkgName}@${copies.get(parentFile.pkgPathReal)}`) // Parent is also multi-version
           : path.join(nodeModulesPath, parentFile.pkgName); // Parent is single-version
 
         // The symlink target is inside the parent's node_modules directory
@@ -657,7 +766,7 @@ async function createDependencySymlinks(
 
         // The symlink source points to the specific version of the dependency required
         // e.g., ../../.versions/dependency@2.0.0 (relative path is calculated later)
-        const source = path.join(versionsPath, `${file.pkgName}@${file.pkgVersion}`);
+        const source = path.join(versionsPath, `${file.pkgName}@${copies.get(file.pkgPathReal)}`);
 
         // Add task to map (overwrites if target already exists, ensuring one link per target)
         symlinkTasks.set(target, source);
@@ -859,12 +968,15 @@ async function readContainingPkgJson(
   return { root, pkgJson };
 }
 
-/** Returns one sample `TracedFile` per unique `pkgName@pkgVersion` in the trace map. */
-function uniquePackages(tracedFiles: Record<string, TracedFile>): TracedFile[] {
+/** Returns one sample `TracedFile` per `keyOf` (default `pkgName@pkgVersion`) in the trace map. */
+function uniquePackages(
+  tracedFiles: Record<string, TracedFile>,
+  keyOf = (file: TracedFile) => `${file.pkgName}@${file.pkgVersion}`
+): TracedFile[] {
   const seen = new Set<string>();
   const samples: TracedFile[] = [];
   for (const file of Object.values(tracedFiles)) {
-    const key = `${file.pkgName}@${file.pkgVersion}`;
+    const key = keyOf(file);
     if (seen.has(key)) continue;
     seen.add(key);
     samples.push(file);
@@ -960,8 +1072,12 @@ async function emitMultiVersionWarning(
  * Globs each unique traced package for `**\/*.node` and adds any prebuilt binaries
  * that nft's static analysis missed (common for node-gyp-build / prebuild-install / napi-rs).
  */
-async function addNativeBinaries(tracedFiles: Record<string, TracedFile>): Promise<void> {
-  for (const sample of uniquePackages(tracedFiles)) {
+async function addNativeBinaries(
+  tracedFiles: Record<string, TracedFile>,
+  copies: Map<string, string> // pkgPathReal -> output copy: each copy is globbed once
+): Promise<void> {
+  const copyOf = (file: TracedFile) => `${file.pkgName}@${copies.get(file.pkgPathReal)}`;
+  for (const sample of uniquePackages(tracedFiles, copyOf)) {
     try {
       // `exclude: node_modules` prevents descending into nested deps under flat layouts —
       // their .node files belong to the inner package, not to this outer one, and the

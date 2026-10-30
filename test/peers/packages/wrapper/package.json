@@ -1,0 +1,11 @@
+{
+  "name": "peer-wrapper",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "peer-host": "file:../host"
+  },
+  "peerDependencies": {
+    "peer-dep": "*"
+  }
+}
